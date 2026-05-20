@@ -1,8 +1,9 @@
 import json
 import asyncio
 
-from modules.bot import run_bots
+from modules.bot import LobbyBot
 from modules.update import Updater
+from modules.itemlist import ItemListUpdater
 
 
 with open("config.json", "r", encoding="utf-8") as f:
@@ -15,6 +16,19 @@ async def startup_update():
 
     updater = Updater()
     await updater.run()
+
+    item_updater = ItemListUpdater(debug=False)
+    await item_updater.run()
+
+
+def run_bots(config):
+    bots = []
+
+    for i, _ in enumerate(config.get("clients", [])):
+        bot = LobbyBot(config, i)
+        bots.append(bot)
+
+        bot.run()
 
 
 def start():
