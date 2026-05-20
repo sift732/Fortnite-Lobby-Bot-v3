@@ -7,7 +7,7 @@ from modules.auth import MyAdvancedAuth
 from modules import translate
 from utils import color
 from utils.logger import Logger
-from modules.update import run_update
+from modules.update import Updater
 
 color.init()
 translate.load_lang()
@@ -22,8 +22,8 @@ async def startup_update():
     if not config.get("check_update_on_startup", True):
         return
 
-    await run_update()
-
+    updater = Updater()
+    await updater.run()
 
 @client.event
 async def event_device_code_generated(link):
@@ -46,5 +46,3 @@ def start():
 
 if __name__ == "__main__":
     start()
-
-#test
