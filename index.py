@@ -7,7 +7,7 @@ from modules.auth import MyAdvancedAuth
 from modules import translate
 from utils import color
 from utils.logger import Logger
-from modules.update import Updater
+from modules.update import run_update
 
 color.init()
 translate.load_lang()
@@ -19,41 +19,32 @@ client = Client(auth=MyAdvancedAuth())
 
 
 async def startup_update():
-    updater = Updater(client)
-
-    if config["check_update_on_startup"] is False:
+    if not config.get("check_update_on_startup", True):
         return
 
-    await updater.run()
+    await run_update()
 
 
 @client.event
 async def event_device_code_generated(link):
     Logger.info(
-        translate.get(
-            "main.confirm_authorization",
-            link,
-            "Epic Games"
-        )
+        translate.get("main.confirm_authorization", link)
     )
 
 
 @client.event
 async def event_ready():
     Logger.success(
-        translate.get(
-            "client.ready",
-            client.user
-        )
+        translate.get("client.ready", client.user)
     )
 
 
-async def main():
-    await startup_update()
+def start():
+    asyncio.run(startup_update())
+    client.run()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    start()
 
-client.run()
-
-# test
+#test
