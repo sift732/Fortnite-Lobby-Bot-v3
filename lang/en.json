@@ -72,7 +72,7 @@
         "load_success": "Successfully loaded",
         "load_failed": "Failed to load. Please fix files",
         "load_failed_web": "Loading didn't finish successfully. Please fix files directly or fix from web",
-        "credit": "Lobby bot: gomashio\nrebootpy: Terbau",
+        "credit": "Lobby bot: gomashio / RS \nrebootpy: xMistt",
         "not_recommended_version": "You using not recommended python version\nRecommend: Python 3.9\nUsing: Python {0}",
         "bit_mismatch": "Bit between installed Python ({0}) and OS ({1}) doesn't match",
         "backup_failed": "Failed backup for '{0}'",
