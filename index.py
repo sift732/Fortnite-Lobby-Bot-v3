@@ -1,10 +1,11 @@
-import json
+import threading
 import asyncio
 
 from modules.bot import LobbyBot
 from modules.update import Updater
 from modules.itemlist import ItemListUpdater
-
+from modules.web import start_web
+import json
 
 with open("config.json", "r", encoding="utf-8") as f:
     config = json.load(f)
@@ -22,23 +23,27 @@ async def startup_update():
     await item_updater.run()
 
 
-async def run_bots():
+def start_web_thread():
 
-    bots = []
-
-    for i, _ in enumerate(config.get("clients", [])):
-
-        bot = LobbyBot(config, i)
-        bots.append(bot)
-
-        asyncio.create_task(bot.start())
+    import asyncio
+    asyncio.run(start_web())
 
 
 async def main():
 
     await startup_update()
 
-    await run_bots()
+    if config.get("web", {}).get("enabled", False):
+
+        threading.Thread(
+            target=start_web_thread,
+            daemon=True
+        ).start()
+
+    for i in range(len(config.get("clients", []))):
+
+        bot = LobbyBot(config, i)
+        asyncio.create_task(bot.start())
 
     while True:
         await asyncio.sleep(3600)
