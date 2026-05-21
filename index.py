@@ -11,6 +11,7 @@ with open("config.json", "r", encoding="utf-8") as f:
 
 
 async def startup_update():
+
     if not config.get("check_update_on_startup", True):
         return
 
@@ -21,20 +22,28 @@ async def startup_update():
     await item_updater.run()
 
 
-def run_bots(config):
+async def run_bots():
+
     bots = []
 
     for i, _ in enumerate(config.get("clients", [])):
+
         bot = LobbyBot(config, i)
         bots.append(bot)
 
-        bot.run()
+        asyncio.create_task(bot.start())
 
 
-def start():
-    asyncio.run(startup_update())
-    run_bots(config)
+async def main():
+
+    await startup_update()
+
+    await run_bots()
+
+    while True:
+        await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":
-    start()
+
+    asyncio.run(main())
