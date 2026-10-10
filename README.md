@@ -3,20 +3,14 @@
 [![Python version](https://img.shields.io/badge/3.14-blue)](https://www.python.org/downloads/release/python-3148/)  
 [![Support server](https://discordapp.com/api/guilds/1557396804486828056/widget.png?style=banner2)](https://discord.gg/tfEE7FdDse)
 
-[English](en/README.md) | [Español](es/README.md) | [日本語](ja/README.md)
+[English](#english) | [Español](#español) | [日本語](#日本語)
 
 ---
 
-## English
+## <a id="english"></a>English
 
 ### Overview
 A Fortnite lobby bot using library [rebootpy](https://github.com/xMistt/rebootpy "github.com/xMistt/rebootpy").
-
-### Install
-[Install](en/setup.md "setup.md")
-
-### Documentation
-[Documentation](en/docs.md "docs.md")
 
 ### License
 [MIT license](LICENSE "License")  
@@ -27,16 +21,10 @@ We are not responsible for any damage caused by using this software.
 
 ---
 
-## Español
+## <a id="español"></a>Español
 
 ### Esquema
 Un bot de Fortnite que utiliza la librería [rebootpy](https://github.com/xMistt/rebootpy "github.com/xMistt/rebootpy") que puedes controlar mediante comandos.
-
-### Métodos para importar
-[Métodos para importar](es/setup.md "setup.md")
-
-### Documentación
-[Documentación](es/docs.md "docs.md")
 
 ### Licencia
 [Licencia MIT](LICENSE "Licencia")  
@@ -47,16 +35,10 @@ No soy responsable de daños causados por el uso de este software.
 
 ---
 
-## 日本語
+## <a id="日本語"></a>日本語
 
 ### 概要
 ライブラリ [rebootpy](https://github.com/xMistt/rebootpy "github.com/xMistt/rebootpy") を使用したFortniteのロビーボットです。
-
-### 導入方法
-[導入方法](ja/setup.md "setup.md")
-
-### 解説
-[解説](ja/docs.md "docs.md")
 
 ### ライセンス
 [MITライセンス](LICENSE "ライセンス")  
