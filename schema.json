@@ -171,7 +171,7 @@
     "['loglevel']": ["string","select_loglevel", { "display_value": "web.editor_config_loglevel"}],
     "['debug']": ["boolean","select_bool", { "display_value": "web.editor_config_debug"}]
   },
-    "client_config_tags": {
+  "client_config_tags": {
     "['fortnite']": ["dict", { "display_value": "web.editor_config_fortnite"}],
     "['fortnite']['owner']": ["array","string","can_be_none", { "display_value": "web.editor_config_fortnite_owner"}],
     "['fortnite']['outfit']": ["string","can_be_none", { "display_value": "web.editor_config_fortnite_outfit"}],
@@ -250,11 +250,11 @@
     "['fortnite']['platform']": ["string","select_platform", { "display_value": "web.editor_config_fortnite_platform"}],
     "['fortnite']['ng_platforms']": ["array","string","multiple_select_platform","can_be_none", { "display_value": "web.editor_config_fortnite_ng_platforms"}],
     "['fortnite']['ng_platform_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_ng_platform_for"}],
-    "['fortnite']['ng_platform_operation']": ["array","string","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_ng_platform_operation"}],
+    "['fortnite']['ng_platform_operation']": ["array","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_ng_platform_operation"}],
     "['fortnite']['ng_platform_reply']": ["string","can_be_none", { "display_value": "web.editor_config_fortnite_ng_platform_reply"}],
     "['fortnite']['ng_names']": ["array","object","ng_names_config", { "display_value": "web.editor_config_fortnite_ng_names"}],
     "['fortnite']['ng_name_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_ng_name_for"}],
-    "['fortnite']['ng_name_operation']": ["array","string","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_ng_name_operation"}],
+    "['fortnite']['ng_name_operation']": ["array","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_ng_name_operation"}],
     "['fortnite']['ng_name_reply']": ["string","can_be_none", { "display_value": "web.editor_config_fortnite_ng_name_reply"}],
     "['fortnite']['status']": ["string", { "display_value": "web.editor_config_fortnite_status"}],
     "['fortnite']['accept_invite_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_accept_invite_for"}],
@@ -265,7 +265,7 @@
     "['fortnite']['send_friend_request']": ["boolean","select_bool", { "display_value": "web.editor_config_fortnite_send_friend_request"}],
     "['fortnite']['whisper_enable_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_whisper_enable_for"}],
     "['fortnite']['party_chat_enable_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_party_chat_enable_for"}],
-    "['fortnite']['permission_command_operation']": ["array","string","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_permission_command_operation"}],
+    "['fortnite']['permission_command_operation']": ["array","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_permission_command_operation"}],
     "['fortnite']['accept_join_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_accept_join_for"}],
     "['fortnite']['join_message']": ["array","string","can_be_none","accept_empty", { "display_value": "web.editor_config_fortnite_join_message"}],
     "['fortnite']['join_message_whisper']": ["array","string","can_be_none","accept_empty", { "display_value": "web.editor_config_fortnite_join_message_whisper"}],
@@ -273,7 +273,7 @@
     "['fortnite']['random_message_whisper']": ["array","array","string","can_be_none","accept_empty", { "display_value": "web.editor_config_fortnite_random_message_whisper"}],
     "['fortnite']['chat_max']": ["number","can_be_none", { "display_value": "web.editor_config_fortnite_chat_max"}],
     "['fortnite']['chat_max_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_chat_max_for"}],
-    "['fortnite']['chat_max_operation']": ["array","string","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_chat_max_operation"}],
+    "['fortnite']['chat_max_operation']": ["array","multiple_select_user_operation","can_be_none", { "display_value": "web.editor_config_fortnite_chat_max_operation"}],
     "['fortnite']['kick_disconnect']": ["boolean","select_bool", { "display_value": "web.editor_config_fortnite_kick_disconnect"}],
     "['fortnite']['kick_in_match']": ["boolean","select_bool", { "display_value": "web.editor_config_fortnite_kick_in_match"}],
     "['fortnite']['hide_for']": ["array","string","multiple_select_user_type","can_be_none", { "display_value": "web.editor_config_fortnite_hide_for"}],
@@ -337,5 +337,5 @@
     "['commands']": ["array","object","custom_commands_config", { "display_value": "web.editor_custom_commands_commands"}],
     "['prefix_to_replies']": ["boolean","select_bool", { "display_value": "web.editor_replies_prefix_to_replies"}],
     "['replies']": ["array","object","replies_config"]
-    }
+  }
 }
