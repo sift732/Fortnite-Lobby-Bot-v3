@@ -1,0 +1,15 @@
+aioconsole==0.8.2
+aiofiles==25.1.0
+aiohttp==3.14.5
+colorama==0.4.6
+jaconv==0.5.0
+Jinja2==3.1.6
+packaging==26.3
+git+https://github.com/sorbatti/rebootpy.git@1e7163bfdc6265b627867844ff2d3a7aa37ce728
+replit==4.1.2
+sanic==25.12.1
+tzlocal==5.4.5
+uvloop==0.23.0
+websockets==17.4
+nextcord==3.2.0
+pykakasi==2.3.0
