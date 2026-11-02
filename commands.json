@@ -83,9 +83,6 @@
     "operation_kick": [
         "kick"
     ],
-    "operation_chatban": [
-        "chatban"
-    ],
     "operation_remove": [
         "remove"
     ],
@@ -440,9 +437,6 @@
         ],
         "kick": [
             "kick"
-        ],
-        "chatban": [
-            "chatban"
         ],
         "hide": [
             "hide"
