@@ -91,11 +91,11 @@ class Updater:
             'static/js/main.js': [],
             'static/js/ws.js': [],
 
-            'templates/index.html': [],
-            'templates/login.html': [],
-            'templates/editor.html': [],
-            'templates/boot-switch.html': [],
-            'templates/clients-viewer.html': [],
+            'templates/index.jinja': [],
+            'templates/login.jinja': [],
+            'templates/editor.jinja': [],
+            'templates/boot-switch.jinja': [],
+            'templates/clients-viewer.jinja': [],
 
             'commands.json': ['diff', 'db', 'backup'],
             'config.json': ['diff', 'db', 'backup'],
