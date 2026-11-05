@@ -4,7 +4,7 @@ Por favor espera...
 ~~[Video]()~~  
 
 ### Instalar Python
-Primero, instala [Python 3.7](https://www.python.org/downloads/release/python-379 "python.org")  
+Primero, instala [Python 3.7](https://www.python.org/downloads/release/python-3148/ "python.org")  
 Después de abrir la página, haga clic en "Instalador de ejecutables de Windows x86-64".  
 que en la parte inferior de la página y descargar el instalador de Python  
 Después de la descarga, ejecute el instalador  
@@ -37,7 +37,7 @@ Click `Finish`
 ![Instalador](https://user-images.githubusercontent.com/53356872/104095506-86a15400-52da-11eb-8545-8a089c29a714.png)  
 
 ### Arrancar Fortnite-LobbyBot-v2
-Abre el repositorio de [Fortnite-LobbyBot-v2](https://github.com/sift732/Fortnite-Lobby-Bot-v3 "github.com") y presiona el botón `Code`, luego presiona `Download Zip`  
+Abre el repositorio de [Fortnite-LobbyBot-v2](https://github.com/gomashio1596/Fortnite-LobbyBot-v2 "github.com") y presiona el botón `Code`, luego presiona `Download Zip`  
 Luego de descargar y extraer el archivo (No explicaré como extraerlo)  
 Pon los archivos en algun lugar de preferencia  
 Ejecuta el archivo INSTALL dentro de la carpeta (Esto solo se necesita hacer al primer inicio o después de una actualización)  
@@ -47,3 +47,4 @@ Ejecuta el archivo INSTALL dentro de la carpeta (Esto solo se necesita hacer al 
 Después de la instalación, cierre la ventana y ejecute RUN (Si hubo un error, revise la versión Python)  
 Aquí llamamos a la pantalla negra 'Log' o 'Consola'...  
 Si el "servidor web que funciona en 'XXX'" el mensaje muestra que el arranque ha terminado.  
+Proceda a la [configuración](setup.md#Procedimiento de configuración "setup.md") del bot

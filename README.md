@@ -3,7 +3,45 @@
 [![Python version](https://img.shields.io/badge/3.14-blue)](https://www.python.org/downloads/release/python-3148/)  
 [![Support server](https://discordapp.com/api/guilds/1557396804486828056/widget.png?style=banner2)](https://discord.gg/tfEE7FdDse)
 
-[English](#english) | [Español](#español) | [日本語](#日本語)
+[日本語](#日本語) | [English](#english) | [Español](#español)
+
+---
+
+## <a id="日本語"></a>日本語
+
+### 概要
+Fortnite-LobbyBot-v3 は、人気を博した Fortnite-Lobby-Bot-v2 (gomashio1596) の正統な後継プロジェクトです。有志によるフォーク（[Not-Bay/Fortnite-LobbyBot-v2](https://github.com/Not-Bay/Fortnite-LobbyBot-v2)）をベースに、AI技術を活用して従来の利便性を残しつつ現代の環境へアップデートしました。
+
+> ⚠️ **開発状況について（絶賛開発中 / WIP）**  
+> 現在も絶賛開発進行中です。まだ全てのファイルや仕様が完璧に揃っておらず、一部未完成・曖昧な部分が残っています。順次、機能追加やコードの改善を行っています。  
+> **今後のアップデートやさらなる進展にぜひご期待ください！**
+
+### 主な特徴
+* **最新ライブラリ対応**: 最新の `rebootpy` をベースにしており、安定したロビー操作が可能です。
+* **手軽なカスタマイズ性**: コマンド操作でスキンやエモートの変更、ロビー設定を簡単に変更できます。
+* **手厚いサポート体制**: 公式Discordサーバーで導入手順の確認やコミュニティでの交流が可能です。
+
+### 動作環境
+* Python 3.14 以上
+
+### ドキュメント
+* [導入方法](docs/ja/setup.md)
+* [解説](docs/ja/docs.md)
+
+### コミュニティ・サポート
+導入手順で困った場合や最新情報をチェックしたい方は、ぜひ公式 [Discord サーバー](https://discord.gg/tfEE7FdDse) に参加してください！
+
+### バグ報告・機能提案
+バグの報告や新しい機能のリクエストは、[GitHubのIssues](../../issues) から気軽にお送りください。
+
+### 貢献（コントリビューション）
+機能改善や不具合修正の Pull Request（PR）は大歓迎です！
+
+### ライセンス
+[MITライセンス](LICENSE "ライセンス")  
+このソフトウェアを無制限で使用することができます。商用、非商用、改変、再配布なども許可されます。  
+ただし、著作権表示と英語のライセンス全文を目に留まる場所に配置してください。  
+このソフトウェアの使用によって発生したいかなる損害にも責任を負いません。
 
 ---
 
@@ -23,6 +61,10 @@ Fortnite-LobbyBot-v3 is the official successor to Fortnite-Lobby-Bot-v2 (gomashi
 
 ### Requirements
 * Python 3.14 or higher
+
+### Documentation
+* [Setup Guide](docs/en/setup.md)
+* [Documentation](docs/en/docs.md)
 
 ### Community & Support
 Need help setting up or want to connect with other users?  
@@ -59,6 +101,10 @@ Fortnite-LobbyBot-v3 es el sucesor oficial de Fortnite-Lobby-Bot-v2 (gomashio159
 ### Requisitos
 * Python 3.14 o superior
 
+### Documentación
+* [Guía de instalación](docs/es/setup.md)
+* [Documentación](docs/es/docs.md)
+
 ### Comunidad y Soporte
 ¿Necesitas ayuda con la instalación o quieres hablar con otros usuarios?  
 ¡Únete a nuestro [Servidor de Discord](https://discord.gg/tfEE7FdDse)!
@@ -74,37 +120,3 @@ Si encuentras algún error o tienes alguna sugerencia, por favor envíala a trav
 El uso sin límites de este software está permitido. Uso comercial y no comercial, modificación y redistribución está permitido.  
 Sin embargo, debes colocar el aviso de copyright y el texto completo de la licencia inglesa en un lugar visible.  
 No soy responsable de daños causados por el uso de este software.
-
----
-
-## <a id="日本語"></a>日本語
-
-### 概要
-Fortnite-LobbyBot-v3 は、人気を博した Fortnite-Lobby-Bot-v2 (gomashio1596) の正統な後継プロジェクトです。有志によるフォーク（[Not-Bay/Fortnite-LobbyBot-v2](https://github.com/Not-Bay/Fortnite-LobbyBot-v2)）をベースに、AI技術を活用して従来の利便性を残しつつ現代の環境へアップデートしました。
-
-> ⚠️ **開発状況について（絶賛開発中 / WIP）**  
-> 現在も絶賛開発進行中です。まだ全てのファイルや仕様が完璧に揃っておらず、一部未完成・曖昧な部分が残っています。順次、機能追加やコードの改善を行っています。  
-> **今後のアップデートやさらなる進展にぜひご期待ください！**
-
-### 主な特徴
-* **最新ライブラリ対応**: 最新の `rebootpy` をベースにしており、安定したロビー操作が可能です。
-* **手軽なカスタマイズ性**: コマンド操作でスキンやエモートの変更、ロビー設定を簡単に変更できます。
-* **手厚いサポート体制**: 公式Discordサーバーで導入手順の確認やコミュニティでの交流が可能です。
-
-### 動作環境
-* Python 3.14 以上
-
-### コミュニティ・サポート
-導入手順で困った場合や最新情報をチェックしたい方は、ぜひ公式 [Discord サーバー](https://discord.gg/tfEE7FdDse) に参加してください！
-
-### バグ報告・機能提案
-バグの報告や新しい機能のリクエストは、[GitHubのIssues](../../issues) から気軽にお送りください。
-
-### 貢献（コントリビューション）
-機能改善や不具合修正の Pull Request（PR）は大歓迎です！
-
-### ライセンス
-[MITライセンス](LICENSE "ライセンス")  
-このソフトウェアを無制限で使用することができます。商用、非商用、改変、再配布なども許可されます。  
-ただし、著作権表示と英語のライセンス全文を目に留まる場所に配置してください。  
-このソフトウェアの使用によって発生したいかなる損害にも責任を負いません。

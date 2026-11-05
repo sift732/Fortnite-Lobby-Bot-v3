@@ -11,7 +11,7 @@ Si ya tienes una, haz click en `Login` para iniciar sesión
 
 Después de iniciar sesión, verás una pantalla como esta, presiona en + arriba a la derecha  
 Y presiona en `Import From Github` dentro de la ventana que se abrió  
-Pega `https://github.com/sift732/Fortnite-Lobby-Bot-v3` en `Paste any repository URL` y haz click en `Import from Github`  
+Pega `https://github.com/gomashio1596/Fortnite-LobbyBot-v2` en `Paste any repository URL` y haz click en `Import from Github`  
 
 ![Repl.it](https://user-images.githubusercontent.com/53356872/103262347-0defed00-49e8-11eb-9463-ebacf3370aab.png)  
 
@@ -23,3 +23,5 @@ Si el bot arrancó, haz click en `Open in a new tab` arriba a la derecha (Si est
 (Llamamos a la página que se abrirá en este momento Página Web)  
 
 ![Repl.it](https://user-images.githubusercontent.com/53356872/103263729-06324780-49ec-11eb-9b3f-f1eafcb4b17b.png)  
+
+Si la página abrió, procede al [setup](setup.md#Procedimiento-hasta-el-setup "setup.md") del bot

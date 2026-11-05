@@ -1,16 +1,16 @@
 ## Procedimiento hasta el primer arranque
-[PC](../es/pc.md "pc.md")  
+[PC](pc.md "pc.md")  
 ・Arrancará usando recursos del PC, la limitación y la degradación del rendimiento son menores  
 ・Pero sólo puedes arrancar el bot mientras el PC está encendido  
 
-[Repl.it](../es/repl.md "repl.md")  (PC/Móvil)  
+[Repl.it](repl.md "repl.md")  (PC/Móvil)  
 ・No necesita poner archivos en su dispositivo, puede arrancar el bot aunque el dispositivo esté apagado  
 ・Pero hay liimitaciones de repl.it  
 
 ## Procedimiento hasta el setup
 **Explicaré asumiendo que ya abriste la página web**
 Deberías ver el editor de configuración, pon el email del bot, owner, etc...  
-Documentación de las configuraciónes están [aquí](../es/config.md "config.md")  
+Documentación de las configuraciónes están [aquí](config.md "config.md")  
 **Si usa repl y no establece la 'Contraseña para el servidor web`, otras personas pueden ver la configuración de su bot**  
 
 Una vez terminado de configurar, presiona el botón Guardar en la parte inferior derecha y el bot se reiniciará  

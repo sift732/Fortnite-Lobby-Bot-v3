@@ -5,7 +5,7 @@
 
 
 ### Pythonのインストール
-まずはPCに[Python 3.7](https://www.python.org/downloads/release/python-379 "python.org")をインストールします  
+まずはPCに[Python 3.7](https://www.python.org/downloads/release/python-3148/ "python.org")をインストールします  
 上記のリンクを開いたら、ページ下部にある`Windows x86-64 executable installer`  
 をクリックしてPythonのインストーラーをダウンロードしてください  
 ダウンロードが完了したらダウンロードしたインストーラーを起動してください  
@@ -39,7 +39,7 @@ gitを使わないならそのまま`Next` * 9, `Install`
 ![インストーラー](https://user-images.githubusercontent.com/53356872/104095506-86a15400-52da-11eb-8545-8a089c29a714.png)  
 
 ### Fortnite-LobbyBot-v2のセットアップ
-Github上の[Fortnite-LobbyBot-v2のリポジトリ](https://github.com/sift732/Fortnite-Lobby-Bot-v3 "github.com")を開き、`Code`ボタンを押して`Download Zip`を押します  
+Github上の[Fortnite-LobbyBot-v2のリポジトリ](https://github.com/gomashio1596/Fortnite-LobbyBot-v2 "github.com")を開き、`Code`ボタンを押して`Download Zip`を押します  
 zipファイルのダウンロードが終わったら、そのファイルを解凍してください (解凍方法については解説しません)  
 解凍したら中のファイルをPC上の適当な場所に配置してください  
 中にあるINSTALLを実行してください (これは初回とアップデート時以外は実行する必要はありません)  
@@ -49,3 +49,4 @@ zipファイルのダウンロードが終わったら、そのファイルを�
 インストールが終わったら画面を閉じ、RUNを実行してください (エラーが出た場合はPythonのバージョンなどが間違っている可能性があります)  
 RUNを実行して出てきた画面をログやコンソールと呼びます  
 `Webサーバーが 'XXX' で起動中です`の表示が出たら起動完了です  
+ボットの[セットアップ](setup.md#セットアップの手順 "setup.md")に進んでください  

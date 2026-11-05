@@ -10,7 +10,7 @@
 
 ログインすると以下のような画面になると思うので、右上の+マークを押し  
 出てきた画面で`Import From Github`を押します  
-`Paste any repository URL`に`https://github.com/sift732/Fortnite-Lobby-Bot-v3`を貼り付け、下の`Import from Github`ボタンを押します  
+`Paste any repository URL`に`https://github.com/gomashio1596/Fortnite-LobbyBot-v2`を貼り付け、下の`Import from Github`ボタンを押します  
 
 ![Repl.it](https://user-images.githubusercontent.com/53356872/103262347-0defed00-49e8-11eb-9463-ebacf3370aab.png)  
 
@@ -23,3 +23,5 @@
 (この時開かれるページをWebページと呼びます)  
 
 ![Repl.it](https://user-images.githubusercontent.com/53356872/103263729-06324780-49ec-11eb-9b3f-f1eafcb4b17b.png)  
+
+ページが開かれたらボットの[セットアップ](setup.md#セットアップの手順 "setup.md")に進んでください  

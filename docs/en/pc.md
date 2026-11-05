@@ -4,7 +4,7 @@ Please wait a while...
 ~~[Video]()~~  
 
 ### Install Python
-First, install [Python 3.7](https://www.python.org/downloads/release/python-379 "python.org")  
+First, install [Python 3.7](https://www.python.org/downloads/release/python-3148/ "python.org")  
 After opened page, click `Windows x86-64 executable installer`  
 which in bottom of page and download Python installer  
 After downloading, run installer  
@@ -37,7 +37,7 @@ Click `Finish`
 ![Installer](https://user-images.githubusercontent.com/53356872/104095506-86a15400-52da-11eb-8545-8a089c29a714.png)  
 
 ### Boot Fortnite-LobbyBot-v2
-Open [Fortnite-LobbyBot-v2 repository](https://github.com/sift732/Fortnite-Lobby-Bot-v3 "github.com") and press `Code` button, then press `Download Zip`  
+Open [Fortnite-LobbyBot-v2 repository](https://github.com/gomashio1596/Fortnite-LobbyBot-v2 "github.com") and press `Code` button, then press `Download Zip`  
 After downloading, unzip file (I won't explain how to unzip)  
 After unzipping, place files inside zip to somewhere  
 RUN INSTALL file inside folder (This won't need to do except first time and update)  
@@ -47,3 +47,4 @@ RUN INSTALL file inside folder (This won't need to do except first time and upda
 After installing, close window and run RUN (If there was an error, check Python version)  
 In here we call black screen 'Log' or 'Console'  
 If `Web server running on 'XXX'` message will shows up boot has finished  
+Proceed to bot's [setup](setup.md#Procedure-to-setup "setup.md")  

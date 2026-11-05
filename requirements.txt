@@ -1,0 +1,14 @@
+aiohttp
+aiofiles
+aioconsole
+colorama
+jaconv
+pykakasi
+nextcord
+sanic
+Jinja2
+websockets
+packaging
+tzlocal
+replit
+rebootpy @ git+https://github.com/sorbatti/rebootpy.git@1e7163bfdc6265b627867844ff2d3a7aa37ce728
