@@ -1,7 +1,7 @@
 import asyncio
-import ast
 import json
 import os
+import re
 import sys
 from typing import TYPE_CHECKING, Optional, Tuple, Union
 
@@ -214,7 +214,7 @@ class Updater:
                 res = await self.bot.http.session.get(uri + path)
             except (OSError, asyncio.TimeoutError):
                 if tries + 1 == retry:
-                    return False, existing
+                    raise RuntimeError(f"Failed to download {path}")
                 await asyncio.sleep(10)
                 continue
             if res.status == 404:
@@ -230,7 +230,7 @@ class Updater:
                     ),
                     add_p=self.bot.time
                 )
-                return False, existing
+                raise RuntimeError(f"File not found: {path}")
             if res.status != 200:
                 retry_after = 10
                 res.release()
@@ -248,9 +248,11 @@ class Updater:
                     ),
                     add_p=self.bot.time
                 )
+                if tries + 1 == retry:
+                    raise RuntimeError(f"HTTP {res.status}: {path}")
                 await asyncio.sleep(retry_after)
                 continue
-    
+
             if path.endswith('.json'):
                 if isinstance(existing, str):
                     existing = json.loads(existing)
@@ -342,36 +344,63 @@ class Updater:
         branch = 'dev' if dev else 'main'
         uri = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
 
-        _, data = await self.check_update(uri, 'modules/auto_updater.py', write=False)
-        if not isinstance(data, str) or not data:
-            return False
-
         try:
-            tree = ast.parse(data)
-            remote_version = None
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    if any(isinstance(target, ast.Name) and target.id == '__version__' for target in node.targets):
-                        remote_version = ast.literal_eval(node.value)
-                        break
+            async with self.bot.http.session.get(f'{uri}version.json') as res:
+                if res.status != 200:
+                    raise RuntimeError(f'HTTP {res.status}: version.json')
+                data = await res.json(content_type=None)
+
+            remote_version = data['version']
             if not isinstance(remote_version, str):
+                raise ValueError('Invalid version')
+            if version.parse(self.version) >= version.parse(remote_version):
                 return False
-        except (SyntaxError, ValueError, TypeError):
+
+            self.bot.send(
+                self.l('new_version', remote_version),
+                add_p=self.bot.time
+            )
+
+            await self.update(uri)
+            await self.write_version(remote_version)
+
+        except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            self.bot.send(
+                self.l('get_failed', 'version.json', 0, 1, 1),
+                add_p=self.bot.time
+            )
+            print(f"Update failed: {exc}", file=sys.stderr)
             return False
 
-        if version.parse(self.version) >= version.parse(remote_version):
-            return False
-
-        self.bot.send(
-            self.l('new_version', remote_version),
-            add_p=self.bot.time
-        )
-        await self.update(uri)
         self.bot.send(
             self.l('update_finish', remote_version),
-            add_p=[self.bot.time, lambda x: f'\\n{x}']
+            add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
+
+    async def write_version(self, remote_version: str) -> None:
+        path = os.path.abspath(__file__)
+        async with aopen(path, 'r', encoding='utf-8') as f:
+            source = await f.read()
+
+        pattern = r"(?m)^__version__\s*=\s*(['\"])[^'\"\r\n]*\1\s*$"
+        updated, count = re.subn(
+            pattern,
+            lambda match: f"__version__ = '{remote_version}'",
+            source,
+            count=1
+        )
+        if count != 1:
+            raise RuntimeError('Version declaration not found')
+
+        temporary = f'{path}.tmp'
+        try:
+            async with aopen(temporary, 'w', encoding='utf-8') as f:
+                await f.write(updated)
+            await areplace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
 
     async def update(self, uri: str) -> None:
         for path in self.updates:
