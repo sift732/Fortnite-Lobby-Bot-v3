@@ -15,9 +15,7 @@ if TYPE_CHECKING:
     from .bot import Bot
 
 
-__version__ = '3.0.0'
-
-
+__version__ = '3.0.1'
 class Updater:
     version = __version__
 
@@ -119,7 +117,7 @@ class Updater:
         }
 
     def l(self, key: str, *args: tuple, default: Optional[str] = '', **kwargs: dict) -> LocalizedText:
-        return LocalizedText(self.bot, ['updater', key], default, *args, **kwargs)
+        return LocalizedText(self.bot, ['main', key], default, *args, **kwargs)
 
     def add_new_key(self, data: dict, new: dict, overwrite: Optional[bool] = False) -> dict:
         if isinstance(new, dict):
