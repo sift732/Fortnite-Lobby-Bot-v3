@@ -91,11 +91,11 @@ class Updater:
             'static/js/main.js': [],
             'static/js/ws.js': [],
 
-            'GUI/index.html': [],
-            'GUI/login.html': [],
-            'GUI/editor.html': [],
-            'GUI/boot-switch.html': [],
-            'GUI/clients-viewer.html': [],
+            'templates/index.html': [],
+            'templates/login.html': [],
+            'templates/editor.html': [],
+            'templates/boot-switch.html': [],
+            'templates/clients-viewer.html': [],
 
             'commands.json': ['diff', 'db', 'backup'],
             'config.json': ['diff', 'db', 'backup'],
