@@ -3245,7 +3245,7 @@ class DefaultCommands:
             await client.show_help(command, message)
             return
 
-        if not await client.ensure_party_leader():
+        if not client.party.me.leader:
             await message.reply(
                 client.l('not_a_party_leader')
             )
@@ -3272,16 +3272,21 @@ class DefaultCommands:
 
             ret = await client.kick_member(member, message)
             if not isinstance(ret, Exception):
-                if not (message.is_party_message() and client.party.member_count <= 1):
-                    try:
-                        await message.reply(
-                            client.l(
-                                'kick',
-                                client.name(member)
-                            )
-                        )
-                    except fortnitepy.ChatError as e:
-                        client.debug_print_exception(e)
+                party = client.party
+                if message.is_party_message() and party is not None:
+                    remaining = [
+                        current
+                        for current in party.members
+                        if current.id not in (client.user.id, member.id)
+                    ]
+                    if not remaining:
+                        return
+                await message.reply(
+                    client.l(
+                        'kick',
+                        client.name(member)
+                    )
+                )
 
         if client.config['search_max'] and len(users) > client.config['search_max']:
             await message.reply(
@@ -3812,18 +3817,49 @@ class DefaultCommands:
             )
             return
 
-        if not client.is_emote_lock_for(message.user_type):
-            await client.party.me.change_asset(
-                'AthenaCharacter',
-                client.party.me.outfit,
-                variants=client.party.me.outfit_variants,
-                enlightenment=(season, number),
+        if not client.is_outfit_lock_for(message.user_type):
+            await client.party.me.set_outfit(
+                enlightenment=(season, number)
             )
             await message.reply(
                 client.l(
                     'set_to',
                     'enlightenment',
                     f'{season}, {number}'
+                )
+            )
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='corruption',
+        usage='{name} [{client.l("number")}]'
+    )
+    async def corruption(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            number = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        if not client.is_outfit_lock_for(message.user_type):
+            await client.party.me.set_outfit(
+                corruption=number
+            )
+            await message.reply(
+                client.l(
+                    'set_to',
+                    'corruption',
+                    number
                 )
             )
         else:
@@ -4120,51 +4156,36 @@ class DefaultCommands:
         usage='{name} [{client.l("number")}]'
     )
     async def crowns(command: Command, client: 'Client', message: MyMessage) -> None:
-
-        try:
-            crowns_count = int(message.args[1])
-        except ValueError:
+        if len(message.args) < 2:
             await client.show_help(command, message)
             return
 
-        meta = client.party.me.meta
-        data = (meta.get_prop('Default:AthenaCosmeticLoadout_j'))['AthenaCosmeticLoadout']
         try:
-            data['cosmeticStats'][1]['statValue'] = crowns_count
-        except KeyError:
-            data['cosmeticStats'] = [
-                {
-                    "statName": "TotalVictoryCrowns",
-                    "statValue": 0
-                },
-                {
-                    "statName": "TotalRoyalRoyales",
-                    "statValue": crowns_count
-                },
-                {
-                    "statName": "HasCrown",
-                    "statValue": 0
-                }
-            ]
-        final = {'AthenaCosmeticLoadout': data}
-        key = 'Default:AthenaCosmeticLoadout_j'
-        prop = {key: meta.set_prop(key, final)}
+            crowns_count = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
 
-        await client.party.me.patch(updated=prop)
+        if crowns_count < 0:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
 
+        await client.party.me.set_victory_crowns(crowns_count)
+        client.config['fortnite']['crowns'] = crowns_count
+        client.bot.save_json('config', client.bot.config)
         await client.party.me.clear_emote()
-
-        await client.party.me.change_asset(
-            'AthenaDance',
-            'EID_Coronet',
-            keep=False
-        )
+        await client.party.me.set_emote('EID_Coronet')
 
         await message.reply(
             client.l(
                 'set_to',
                 client.bot.l('crowns'),
-                message.args[1]
+                crowns_count
             )
         )
 
