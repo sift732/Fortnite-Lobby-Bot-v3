@@ -1,4115 +1,4525 @@
 import asyncio
 import datetime
 import importlib
-import inspect
-import io
 import json
-from pathlib import Path
+import os
 import random
 import re
 import sys
 from functools import partial
-from typing import (TYPE_CHECKING, Any, Awaitable, Callable, Dict, List,
-                    Optional, Tuple, Type, Union)
+from enum import Enum
+from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Union
 
-import jaconv
-
-from .colors import blue, green, magenta, yellow, red
-from .commands import (Command, DummyMessage, DummyUser, FindUserMatchMethod,
-                       FindUserMode, MyMessage)
-from .cosmetics import Searcher
-from .discord_client import DiscordClient
-from .localize import LocalizedText
-from .web import auth
-from .webhook import WebhookClient
+from .colors import yellow
 
 if TYPE_CHECKING:
     from .bot import Bot
+    from .client import Client
+    from .discord_client import DiscordClient
 
 discord = importlib.import_module('nextcord')
-rebootpy = importlib.import_module('rebootpy')
+fortnitepy = importlib.import_module('rebootpy')
 
 
-class MyClientPartyMember(rebootpy.ClientPartyMember):
-    ASSET_CONVERTER = {
-        'AthenaCharacter': rebootpy.ClientPartyMember.outfit,
-        'AthenaBackpack': rebootpy.ClientPartyMember.backpack,
-        'AthenaPet': rebootpy.ClientPartyMember.backpack,
-        'AthenaPetCarrier': rebootpy.ClientPartyMember.backpack,
-        'AthenaPickaxe': rebootpy.ClientPartyMember.pickaxe,
-        'AthenaDance': rebootpy.ClientPartyMember.emote,
-        'AthenaEmoji': rebootpy.ClientPartyMember.emote,
-        'AthenaToy': rebootpy.ClientPartyMember.emote,
-        'AthenaConsumableEmote': rebootpy.ClientPartyMember.emote
+Clients = Union[
+    'Bot',
+    'Client'
+]
+Messages = Union[
+    fortnitepy.FriendMessage,
+    fortnitepy.PartyMessage,
+    discord.Message
+]
+Users = Union[
+    fortnitepy.User,
+    fortnitepy.Friend,
+    fortnitepy.PartyMember,
+    discord.User,
+    discord.Member
+]
+
+
+class PartyPrivacy(Enum):
+    PUBLIC = {
+        'partyType': 'Public',
+        'inviteRestriction': 'AnyMember',
+        'onlyLeaderFriendsCanJoin': False,
+        'presencePermission': 'Anyone',
+        'invitePermission': 'Anyone',
+        'acceptingMembers': True,
     }
-    VARIANTS_CONVERTER = {
-        'AthenaCharacter': rebootpy.ClientPartyMember.outfit_variants,
-        'AthenaBackpack': rebootpy.ClientPartyMember.backpack_variants,
-        'AthenaPet': rebootpy.ClientPartyMember.backpack_variants,
-        'AthenaPetCarrier': rebootpy.ClientPartyMember.backpack_variants,
-        'AthenaPickaxe': rebootpy.ClientPartyMember.pickaxe_variants,
-        'AthenaDance': None,
-        'AthenaEmoji': None,
-        'AthenaToy': None,
-        'AthenaConsumableEmote': None
+    FRIENDS_ALLOW_FRIENDS_OF_FRIENDS = {
+        'partyType': 'FriendsOnly',
+        'inviteRestriction': 'AnyMember',
+        'onlyLeaderFriendsCanJoin': False,
+        'presencePermission': 'Anyone',
+        'invitePermission': 'Anyone',
+        'acceptingMembers': True,
     }
-    ASSET_PATH_CONVERTER = {
-        'AthenaCharacter': ("AthenaCharacterItemDefinition'/Game/Athena/Items/"
-                            "Cosmetics/Characters/{0}.{0}'"),
-        'AthenaBackpack': ("AthenaBackpackItemDefinition'/Game/Athena/Items/"
-                           "Cosmetics/Backpacks/{0}.{0}'"),
-        'AthenaPet': ("AthenaPetItemDefinition'/Game/Athena/Items/"
-                      "Cosmetics/Pets/{0}.{0}'"),
-        'AthenaPetCarrier': ("AthenaPetCarrierItemDefinition'/Game/Athena/Items/"
-                             "Cosmetics/PetCarriers/{0}.{0}'"),
-        'AthenaPickaxe': ("AthenaPickaxeItemDefinition'/Game/Athena/Items/"
-                          "Cosmetics/Pickaxes/{0}.{0}'"),
-        'AthenaDance': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                        "Cosmetics/Dances/{0}.{0}'"),
-        'AthenaEmoji': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                        "Cosmetics/Dances/Emoji/{0}.{0}'"),
-        'AthenaToy': ("AthenaToyItemDefinition'/Game/Athena/Items/"
-                      "Cosmetics/Toys/{0}.{0}'"),
-        'AthenaConsumableEmote': ("AthenaConsumableEmoteItemDefinition'/Game/Athena/Items/"
-                                  "Cosmetics/ConsumableEmotes/{0}.{0}"),
-        'HolidayCracker': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                           "Cosmetics/Dances/HolidayCracker/{0}.{0}'"),
-        'PapayaComms': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                        "Cosmetics/Dances/PapayaComms/{0}.{0}'"),
-        'Chugga': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                   "Cosmetics/Dances/Chugga/{0}.{0}'"),
-        'PatPat': ("AthenaDanceItemDefinition'/Game/Athena/Items/"
-                   "Cosmetics/Dances/PatPat/{0}.{0}'")
+    FRIENDS = {
+        'partyType': 'FriendsOnly',
+        'inviteRestriction': 'LeaderOnly',
+        'onlyLeaderFriendsCanJoin': True,
+        'presencePermission': 'Leader',
+        'invitePermission': 'Leader',
+        'acceptingMembers': False,
     }
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.ASSET_FUNCTION_CONVERTER = {
-            'AthenaCharacter': self.set_outfit,
-            'AthenaBackpack': self.set_backpack,
-            'AthenaPet': self.set_backpack,
-            'AthenaPetCarrier': self.set_backpack,
-            'AthenaPickaxe': self.set_pickaxe,
-            'AthenaDance': self.set_emote,
-            'AthenaEmoji': self.set_emote,
-            'AthenaToy': self.set_emote,
-            'AthenaConsumableEmote': self.set_emote
-        }
-
-    @classmethod
-    def get_asset_path(cls, item: str, asset: Optional[str] = None) -> str:
-        if asset is not None:
-            if asset != '' and '.' not in asset:
-                if item == 'AthenaDance':
-                    if asset.lower().startswith('eid_holidaycracker'):
-                        item = 'HolidayCracker'
-                    elif asset.lower().endswith('papayacomms'):
-                        item = 'PapayaComms'
-                    elif  asset.lower().startswith('eid_chugga'):
-                        item = 'Chugga'
-                    elif  asset.lower().startswith('eid_patpat'):
-                        item = 'PatPat'
-                asset = cls.ASSET_PATH_CONVERTER[item].format(asset)
-        return asset
-
-    def asset(self, item: str) -> Optional[str]:
-        p = self.ASSET_CONVERTER.get(item)
-        if p is None:
-            return None
-        return p.fget(self)
-
-    def variants(self, item: str) -> list:
-        p = self.VARIANTS_CONVERTER.get(item)
-        if p is None:
-            return []
-        return p.fget(self)
-
-    async def change_asset(self, item: str,
-                           asset: Optional[str] = None,
-                           keep: Optional[bool] = True,
-                           do_point: Optional[bool] = True, **kwargs: Any) -> bool:
-        if item not in self.ASSET_FUNCTION_CONVERTER:
-            return False
-
-        if isinstance(asset, str) and asset:
-            matched = re.search(r"([^/\\.'\"]+)\.\1(?:['\"])?$", asset)
-            if matched:
-                asset = matched.group(1)
-            elif asset.startswith('<Item '):
-                matched = re.search(r"\bid=['\"]([^'\"]+)['\"]", asset)
-                if matched:
-                    asset = matched.group(1)
-
-        func = self.ASSET_FUNCTION_CONVERTER[item]
-        options = {}
-        if item in ('AthenaCharacter', 'AthenaBackpack', 'AthenaPet', 'AthenaPetCarrier'):
-            for key in ('variants', 'enlightenment', 'corruption'):
-                if key in kwargs and kwargs[key] is not None:
-                    options[key] = kwargs[key]
-        elif item == 'AthenaPickaxe':
-            if not asset:
-                asset = 'DefaultPickaxe'
-            if 'variants' in kwargs and kwargs['variants'] is not None:
-                options['variants'] = kwargs['variants']
-        else:
-            for key in ('run_for', 'section', 'key'):
-                if key in kwargs and kwargs[key] is not None:
-                    options[key] = kwargs[key]
-
-        if item in ('AthenaDance', 'AthenaEmoji', 'AthenaToy', 'AthenaConsumableEmote'):
-            if asset is None or asset == '':
-                await self.clear_emote()
-                if keep:
-                    self.client.emote = None
-                    self.client.emote_section = None
-            else:
-                if self.asset(item) == asset:
-                    await self.clear_emote()
-                await func(asset=asset, **options)
-                if keep:
-                    self.client.emote = asset
-                    self.client.emote_section = options.get('section')
-        else:
-            if keep:
-                await self.edit_and_keep(partial(func, asset=asset, **options))
-            else:
-                await func(asset=asset, **options)
-            if item == 'AthenaPickaxe' and do_point and self.client.config.get('fortnite', {}).get('do_point', False):
-                await self.change_asset('AthenaDance', 'EID_IceKing', keep=False, do_point=False)
-        return True
-
-    async def hide(self) -> None:
-        if self.client.is_creating_party():
-            return
-
-        if not await self.client.ensure_party_leader():
-            raise rebootpy.Forbidden('You must be the party leader '
-                                       'to perform this action')
-        party = self.party
-        if party != self.client.party:
-            raise rebootpy.PartyError('Client is not belong to '
-                                        'this member\'s party')
-
-        if not isinstance(self.party, rebootpy.ClientParty):
-            party = self.client.party
-
-        if party.add_hide_user(self.id):
-            await party.refresh_squad_assignments()
-
-    async def show(self) -> None:
-        if self.client.is_creating_party():
-            return
-
-        if not await self.client.ensure_party_leader():
-            raise rebootpy.Forbidden('You must be the party leader '
-                                       'to perform this action')
-        party = self.party
-        if party != self.client.party:
-            raise rebootpy.PartyError('Client is not belong to '
-                                        'this member\'s party')
-
-        if not isinstance(self.party, rebootpy.ClientParty):
-            party = self.client.party
-
-        if party.remove_hide_user(self.id):
-            await party.refresh_squad_assignments()
-
-
-class MyClientParty(rebootpy.ClientParty):
-    def __init__(self, client: 'Client', data: dict) -> None:
-        super().__init__(client, data)
-        self._hides = []
-        self.party_chat = []
-
-    def update_hide_users(self, user_ids: List[str]) -> None:
-        self._hides = user_ids
-
-    def add_hide_user(self, user_id: str) -> bool:
-        if user_id not in self._hides:
-            self._hides.append(user_id)
-            return True
-        return False
-
-    def remove_hide_user(self, user_id: str) -> bool:
-        if user_id in self._hides:
-            self._hides.remove(user_id)
-            return True
-        return False
-
-    async def hide(self, member: rebootpy.PartyMember) -> None:
-        if self.me is not None and not await self.client.ensure_party_leader():
-            raise rebootpy.Forbidden('You have to be leader for this action to work.')
-
-        self.add_hide_user(member.id)
-        if member.id in self._members.keys():
-            await self.refresh_squad_assignments()
-
-    async def show(self, member: rebootpy.PartyMember) -> None:
-        if self.me is not None and not await self.client.ensure_party_leader():
-            raise rebootpy.Forbidden('You have to be leader for this action to work.')
-
-        self.remove_hide_user(member.id)
-        if member.id in self._members.keys():
-            await self.refresh_squad_assignments()
-
-    def _convert_squad_assignments(self, assignments):
-        results = []
-        sub = 0
-        for member, assignment in assignments.items():
-            if assignment.hidden or member.id in self._hides:
-                sub += 1
-                continue
-
-            results.append({
-                'memberId': member.id,
-                'absoluteMemberIdx': assignment.position - sub,
-            })
-
-        return results
-
-
-
-    def construct_presence(self, text: Optional[str] = None) -> dict:
-        perm = self.config['privacy']['presencePermission']
-        if perm == 'Noone' or (perm == 'Leader' and (self.me is not None
-                                                     and not self.me.leader)):
-            join_data = {
-                'bInPrivate': True
-            }
-        else:
-            join_data = {
-                'sourceId': self.client.user.id,
-                'sourceDisplayName': self.client.user.display_name,
-                'sourcePlatform': self.client.platform.value,
-                'partyId': self.id,
-                'partyTypeId': 286331153,
-                'key': 'k',
-                'appId': 'Fortnite',
-                'buildId': self.client.party_build_id,
-                'partyFlags': -2024557306,
-                'notAcceptingReason': 0,
-                'pc': self.member_count,
-            }
-
-        status = text or self.client.status
-
-        try:
-            status  = self.client.eval_format(
-                status,
-                self.client.variables
-            )
-        except Exception:
-            status = None
-
-        _default_status = {
-            'Status': status,
-            'bIsPlaying': False,
-            'bIsJoinable': False,
-            'bHasVoiceSupport': False,
-            'SessionId': '',
-            'ProductName': 'Fortnite',
-            'Properties': {
-                'party.joininfodata.286331153_j': join_data,
-                'FortBasicInfo_j': {
-                    'homeBaseRating': 1,
-                },
-                'FortLFG_I': '0',
-                'FortPartySize_i': 1,
-                'FortSubGame_i': 1,
-                'InUnjoinableMatch_b': False,
-                'FortGameplayStats_j': {
-                    'state': '',
-                    'playlist': 'None',
-                    'numKills': 0,
-                    'bFellToDeath': False,
-                },
-                'GamePlaylistName_s': self.playlist_info[0],
-                'Event_PlayersAlive_s': '0',
-                'Event_PartySize_s': str(len(self._members)),
-                'Event_PartyMaxSize_s': str(self.max_size),
-            },
-        }
-        return _default_status
-
-
-class Client(rebootpy.Client):
-    ASSET_CONVERTER = {
-        'AthenaCharacter': rebootpy.PartyMember.outfit,
-        'AthenaBackpack': rebootpy.PartyMember.backpack,
-        'AthenaPet': rebootpy.PartyMember.backpack,
-        'AthenaPetCarrier': rebootpy.PartyMember.backpack,
-        'AthenaPickaxe': rebootpy.PartyMember.pickaxe,
-        'AthenaDance': rebootpy.PartyMember.emote,
-        'AthenaEmoji': rebootpy.PartyMember.emote,
-        'AthenaToy': rebootpy.PartyMember.emote,
-        'AthenaConsumableEmote': rebootpy.PartyMember.emote
+    PRIVATE_ALLOW_FRIENDS_OF_FRIENDS = {
+        'partyType': 'Private',
+        'inviteRestriction': 'AnyMember',
+        'onlyLeaderFriendsCanJoin': False,
+        'presencePermission': 'Noone',
+        'invitePermission': 'Anyone',
+        'acceptingMembers': False,
     }
-    VARIANTS_CONVERTER = {
-        'AthenaCharacter': rebootpy.PartyMember.outfit_variants,
-        'AthenaBackpack': rebootpy.PartyMember.backpack_variants,
-        'AthenaPet': rebootpy.PartyMember.backpack_variants,
-        'AthenaPetCarrier': rebootpy.PartyMember.backpack_variants,
-        'AthenaPickaxe': rebootpy.PartyMember.pickaxe_variants,
-        'AthenaDance': None,
-        'AthenaEmoji': None,
-        'AthenaToy': None,
-        'AthenaConsumableEmote': None
-    }
-    PLATFORM_CONVERTER = {
-        rebootpy.Platform.WINDOWS: "Windows",
-        rebootpy.Platform.MAC: "Mac",
-        rebootpy.Platform.PLAYSTATION: "PlayStation 4",
-        rebootpy.Platform.PLAYSTATION_5: "PlayStation 5",
-        rebootpy.Platform.XBOX: "Xbox One",
-        rebootpy.Platform.XBOX_X: "Xbox One X",
-        rebootpy.Platform.SWITCH: "Switch",
-        rebootpy.Platform.SWITCH_2: "Switch2",
-        rebootpy.Platform.IOS: "IOS",
-        rebootpy.Platform.ANDROID: "Android"
+    PRIVATE = {
+        'partyType': 'Private',
+        'inviteRestriction': 'LeaderOnly',
+        'onlyLeaderFriendsCanJoin': True,
+        'presencePermission': 'Noone',
+        'invitePermission': 'Leader',
+        'acceptingMembers': False,
     }
 
-    def __init__(self, bot: 'Bot', config: dict, num: int,
-                 auth: rebootpy.Auth, *, loop: asyncio.AbstractEventLoop = None,
-                 **kwargs) -> None:
-        self.bot = bot
-        self.config = config
-        self.num = num
-        self.commands = self.bot.commands
-        self.localize = self.bot.localize
-        self.all_commands = self.bot.all_commands
-        self.whitelist_commands = self.bot.whitelist_commands
-        self.user_commands = self.bot.user_commands
-        self.custom_commands = self.bot.custom_commands
-        self.replies = self.bot.replies
-        self.disabled_replies = []
-        self.searcher = Searcher(
-            self.bot,
-            self.bot.main_items,
-            self.bot.sub_items,
-            self.bot.main_playlists,
-            self.bot.sub_playlists,
-            self.config['case_insensitive'],
-            self.config['convert_kanji']
+
+class FindUserMatchMethod(Enum):
+    FULL = 'full'
+    CONTAINS = 'contains'
+    STARTS = 'starts'
+    ENDS = 'ends'
+
+
+class FindUserMode(Enum):
+    DISPLAY_NAME = 'display_name'
+    ID = 'id'
+    NAME_ID = 'name_id'
+
+
+class DummyUser:
+    def __init__(self) -> None:
+        self.display_name = 'Dummy'
+        self.id = 'Dummy'
+
+
+class DummyMessage:
+    def __init__(self, client: Clients, message: Messages, *,
+                 content: Optional[str] = None,
+                 author: Optional[Users] = None) -> None:
+        self.client = client
+
+        self.message = (
+            message
+            if not isinstance(message, self.__class__) else
+            message.message
+        )
+        self.content = content or message.content
+
+        self.author = author or message.author
+        self.created_at = (
+            message.created_at
+            if hasattr(message, 'created_at') else
+            datetime.datetime.utcnow()
         )
 
-        kwargs.setdefault('default_party_member_config', rebootpy.DefaultPartyMemberConfig(cls=MyClientPartyMember))
-        kwargs.setdefault('default_party_config', rebootpy.DefaultPartyConfig(cls=MyClientParty))
-        super().__init__(auth=auth, **kwargs)
-        self.loop = loop if loop is not None else asyncio.get_running_loop()
+        self.result = ''
 
-        self._is_booting = False
-        self.booted_at = None
-        self.emote = None
-        self.emote_section = None
-        self.do_point = self.config['fortnite'].get('do_point', False)
+    def reply(self, content: str) -> None:
+        self.result += f'\n{content}'
 
-        self.client_id = config.get('id')
-        self.config_user_pattern = re.compile(
-            r"<User id='(?P<id>[a-z0-9]{32})' "
-            r"display_name=(?P<display_name>('.+'|None)) "
-            r"external_auths=(?P<external_auths>\["
-            r"(\"<ExternalAuth external_id=('.+'|None) "
-            r"external_display_name=('.+'|None) "
-            r"type='.+'>\")?(, \"<ExternalAuth external_id=('.+'|None) "
-            r"external_display_name=('.+'|None) "
-            r"type='.+'>\")*"
-            r"\])>"
+
+class MyMessage:
+    def __init__(self, client: Clients, message: Messages, *,
+                 content: Optional[str] = None,
+                 author: Optional[Users] = None,
+                 discord_client: Optional['DiscordClient'] = None) -> None:
+        self.client = client
+        self.discord_client = discord_client or client.discord_client
+
+        self.message = (
+            message
+            if not isinstance(message, self.__class__) else
+            message.message
         )
-        self.return_pattern = re.compile(
-            r"(?P<space>\s*)(return|return\s+(?P<text>.*))\s*"
+        self.content = content or message.content
+        self.content = self.content.strip('\r\n').strip('\r').strip('\n')
+
+        self.args = re.split(r'\s', self.content)
+        self.author = author or message.author
+        self.user_type = (
+            self.discord_client.get_user_type(message.author.id)
+            if self.is_discord_message() else
+            'owner'
+            if not isinstance(self.message, (discord.Message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None)))))) else
+            self.client.get_user_type(message.author.id)
         )
-        self._members = {}
+        self.created_at = message.created_at
+        self.prev = None
 
-        _events = [
-            'party_member_kick',
-            'party_member_zombie',
-            'party_member_reconnect',
-            'party_member_expire',
-            'party_member_update',
-            'party_member_join',
-            'party_member_leave'
-        ]
-        for event in _events:
-            self.add_event_handler(event, self.store_member_event)
-        self.add_event_handler('party_member_promote', self.store_leader_event)
-        self.add_event_handler('party_member_confirm', self.store_join_confirmation_event)
+    def is_discord_message(self) -> bool:
+        return isinstance(self.message, discord.Message)
 
-        self.webhook = WebhookClient(self, self.bot, self.loop, self.bot.http)
-        self.webhook.start()
+    def is_friend_message(self) -> bool:
+        return isinstance(self.message, fortnitepy.FriendMessage)
 
-        self.prev = {}
-        self.select = {}
-        self.party_hides = {}
-        self.join_requests = {}
-        self.invites = {}
-        self.stoppable_tasks = []
-        self.invite_interval = False
-        self.invite_interval_handle = None
+    def is_party_message(self) -> bool:
+        return isinstance(self.message, fortnitepy.PartyMessage)
 
-        self.outfit_mimic = []
-        self.backpack_mimic = []
-        self.pickaxe_mimic = []
-        self.emote_mimic = []
-        self._owner = {}
-        self._whitelist = {}
-        self._blacklist = {}
-        self._botlist = {}
-        self._invitelist = {}
-        self.whisper = {}
-        self.party_chat = {
-            'party_id': None,
-            'party_chat': []
-        }
-
-        async def _store_whisper(to, author, content):
-            if to not in self.whisper:
-                self.whisper[to] = {'display_name': (await self.fetch_user(to, cache=True)).display_name, 'content': []}
-            self.whisper[to]['content'].append({
-                'author': {
-                    'id': author.id,
-                    'display_name': author.display_name
-                },
-                'content': content,
-                'received_at': self.bot.strftime(datetime.datetime.utcnow())
-            })
-            self.dispatch_event(
-                'store_whisper',
-                to,
-                self.whisper[to]['content'][-1]
-            )
-
-        async def store_whisper(message):
-            await _store_whisper(message.author.id, message.author, message.content)
-
-        self.add_event_handler('friend_message', store_whisper)
-
-        async def store_sent_whisper(author, content):
-            await _store_whisper(author.id, self.user, content)
-
-        self.add_event_handler('friend_message_send', store_sent_whisper)
-
-        def _store_party_chat(party, author, content):
-            if party.id != self.party_id or self.party_id is None:
-                return
-            if self.party_chat['party_id'] is None:
-                self.party_chat['party_id'] = self.party_id
-            if self.party_id != self.party_chat['party_id']:
-                self.party_chat['party_id'] = self.party_id
-                self.party_chat['party_chat'].clear()
-                self.dispatch_event('clear_party_chat')
-            self.party_chat['party_chat'].append({
-                'author': {
-                    'id': author.id,
-                    'display_name': author.display_name
-                },
-                'content': content,
-                'received_at': self.bot.strftime(datetime.datetime.utcnow())
-            })
-            self.dispatch_event(
-                'store_party_chat',
-                self.party_chat['party_chat'][-1]
-            )
-
-        async def store_party_chat(message):
-            _store_party_chat(getattr(message, 'party', None) or getattr(message.author, 'party', None) or self.party, message.author, message.content)
-
-        self.add_event_handler('party_message', store_party_chat)
-
-        async def store_sent_party_chat(party, content):
-            _store_party_chat(party, self.user, content)
-
-        self.add_event_handler('party_message_send', store_sent_party_chat)
-
-        async def store_member_join(member):
-            system = rebootpy.User.__new__(rebootpy.User)
-            system._epicgames_display_name = 'System'
-            system._external_display_name = 'System'
-            system._id = None
-            system._external_auths = []
-            _store_party_chat(
-                member.party,
-                system,
-                self.bot.web.l('party_joined', member.display_name).get_text()
-            )
-
-        self.add_event_handler('party_member_join', store_member_join)
-
-        async def store_member_leave(member):
-            system = rebootpy.User.__new__(rebootpy.User)
-            system._epicgames_display_name = 'System'
-            system._external_display_name = 'System'
-            system._id = None
-            system._external_auths = []
-            _store_party_chat(
-                member.party,
-                system,
-                self.bot.web.l('party_left', member.display_name).get_text()
-            )
-
-        self.add_event_handler('party_member_leave', store_member_leave)
-        self.add_event_handler('party_member_kick', store_member_leave)
-
-        self.OPERATION_FUNC_CONVERTER = {
-            'kick': rebootpy.PartyMember.kick,
-            'remove': rebootpy.Friend.remove,
-            'block': rebootpy.User.block,
-            'blacklist': self.add_to_blacklist
-        }
-
-        if self.config['discord']['enabled']:
-            intents = discord.Intents.default()
-            intents.message_content = True
-
-            self.discord_client = DiscordClient(self, self.config, intents=intents)
-        else:
-            self.discord_client = None
-
-    @property
-    def _caches(self) -> dict:
-        return {
-            **self._members,
-            **self._blocked_users,
-            **self._pending_friends,
-            **self._friends,
-            **self._users
-        }
-
-    def is_booting(self) -> bool:
-        return self._is_booting
-
-    def is_incoming_pending(self, user_id: str) -> bool:
-        return self.get_incoming_pending_friend(user_id) is not None
-
-    def is_outgoing_pending(self, user_id: str) -> bool:
-        return self.get_outgoing_pending_friend(user_id) is not None
-
-    def store_member(self, member: rebootpy.party.PartyMemberBase,
-                     *, try_cache: bool = True) -> rebootpy.party.PartyMemberBase:
-        try:
-            if try_cache:
-                return self._members[member.id]
-        except KeyError:
-            pass
-
-        self._members[member.id] = member
-        return member
-
-    def get_member(self, user_id: str) -> Optional[rebootpy.party.PartyMemberBase]:
-        return self._members.get(user_id)
-
-    def get_as_user(self, user: Type[rebootpy.user.UserBase]) -> rebootpy.User:
-        return rebootpy.User(self, user.get_raw())
-
-    def get_cache_user(self, user_id: str) -> Optional[rebootpy.User]:
-        tries = [
-            self.get_user,
-            self.get_friend,
-            self.get_pending_friend,
-            self.get_blocked_user,
-            self.get_member
-        ]
-        for func in tries:
-            u = func(user_id)
-            if u is not None:
-                return self.get_as_user(u)
-
-    def refresh_caches(self, priority: int = 0) -> callable:
-        self._members.clear()
-        return super().refresh_caches(priority)
-
-    async def store_member_event(self, member: rebootpy.PartyMember) -> None:
-        self.store_member(member)
-
-
-    async def store_leader_event(self, old: rebootpy.PartyMember, new: rebootpy.PartyMember) -> None:
-        self.loop.create_task(self.store_member_event(old))
-        self.loop.create_task(self.store_member_event(new))
-
-    async def store_join_confirmation_event(self, confirmation: rebootpy.PartyJoinConfirmation) -> None:
-        self.store_user(confirmation.user.get_raw())
-
-    def is_display_name(self, value: str) -> bool:
-        if not isinstance(value, str):
-            return False
-        return re.fullmatch(r'[0-9a-fA-F]{32}', value) is None and re.fullmatch(
-            r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', value
-        ) is None
-
-    async def fetch_users(self, users, *,
-                          cache: bool = False,
-                          raw: bool = False) -> List[rebootpy.User]:
-        if len(users) == 0:
-            return []
-
-        _users = []
-        new = []
-        tasks = []
-
-        def find_by_display_name(dn):
-            if cache:
-                for u in self._caches.values():
-                    try:
-                        if u.display_name is not None:
-                            if u.display_name.casefold() == dn.casefold():
-                                _users.append(u)
-                                return
-                    except AttributeError:
-                        pass
-
-            task = self.http.account_graphql_get_by_display_name(elem)
-            tasks.append(task)
-
-        for elem in users:
-            if self.is_display_name(elem):
-                find_by_display_name(elem)
-            else:
-                if cache:
-                    p = self.get_cache_user(elem)
-                    if p:
-                        if raw:
-                            _users.append(p.get_raw())
-                        else:
-                            _users.append(p)
-                        continue
-                new.append(elem)
-
-        if len(tasks) > 0:
-            pfs = await asyncio.gather(*tasks)
-            for p_data in pfs:
-                accounts = p_data['account']
-                for account_data in accounts:
-                    if account_data['displayName'] is not None:
-                        new.append(account_data['id'])
-                        break
-                else:
-                    for account_data in accounts:
-                        if account_data['displayName'] is None:
-                            new.append(account_data['id'])
-                            break
-
-        chunk_tasks = []
-        chunks = [new[i:i + 100] for i in range(0, len(new), 100)]
-        for chunk in chunks:
-            task = self.http.account_get_multiple_by_user_id(chunk)
-            chunk_tasks.append(task)
-
-        if len(chunks) > 0:
-            d = await asyncio.gather(*chunk_tasks)
-            for results in d:
-                for result in results:
-                    if raw:
-                        _users.append(result)
-                    else:
-                        u = self.store_user(result, try_cache=cache)
-                        _users.append(u)
-        return _users
-
-    async def fetch_multiple_users(self, user_ids: List[str]) -> Dict[str, rebootpy.User]:
-        if len(user_ids) == 0:
-            return {}
-
-        chunk_tasks = []
-        chunks = [user_ids[i:i + 100] for i in range(0, len(user_ids), 100)]
-        for chunk in chunks:
-            task = self.http.account_get_multiple_by_user_id(chunk)
-            chunk_tasks.append(task)
-
-        users = {}
-        if len(chunks) > 0:
-            d = await asyncio.gather(*chunk_tasks)
-            for results in d:
-                for result in results:
-                    users[result['id']] = self.store_user(result, try_cache=False)
-        return users
-
-    async def join_party(self, party_id: str) -> rebootpy.ClientParty:
-        hides = self.party_hides.get(party_id)
-        if hides is None:
-            self.party_hides[party_id] = []
-        party = await super().join_party(party_id)
-        party.update_hide_users(self.party_hides[party_id])
-        return party
-
-    async def join_party_ping(self, party_id: str,
-                              pinger_id: str) -> rebootpy.ClientParty:
-        hides = self.party_hides.get(party_id)
-        if hides is None:
-            self.party_hides[party_id] = []
-        party = await super().join_party_ping(party_id, pinger_id)
-        party.update_hide_users(self.party_hides[party_id])
-        return party
-
-    async def set_presence(self, status: str, *,
-                           away: rebootpy.AwayStatus = rebootpy.AwayStatus.ONLINE) -> Callable:
-        if not isinstance(status, str):
-            raise TypeError('status must be a str')
-
-        self.status = status
-        self.away = away
-        if self.party is not None:
-            status = self.party.construct_presence(status)
-
-        await self.xmpp.send_presence(
-            status=status,
-            show=away.value
-        )
-
-    async def send_presence(self, status: Union[str, dict], *,
-                            away: rebootpy.AwayStatus = rebootpy.AwayStatus.ONLINE,
-                            to: Optional[str] = None) -> None:
-        if isinstance(status, str) and self.party is not None:
-            status = self.party.construct_presence(status)
-
-        await self.xmpp.send_presence(
-            status=status,
-            show=away.value,
-            to=to
-        )
-
-    async def close(self, *args: Any, **kwargs: Any) -> None:
-        tasks = [super().close(*args, **kwargs)]
-        if self.discord_client is not None:
-            tasks.append(self.discord_client.close())
-        await asyncio.gather(*tasks)
-
-    async def start(self, *args: Any, **kwargs: Any) -> None:
-        self._is_booting = True
-        try:
-            tasks = [super().start(*args, **kwargs)]
-            if self.discord_client is not None and self.discord_client.config['discord']['token']:
-                tasks.append(self.discord_client.start(self.discord_client.config['discord']['token']))
-            await asyncio.gather(*tasks)
-        finally:
-            self._is_booting = False
-
-
-    async def send_friend_request(self, user: Type[rebootpy.user.UserBase],
-                                  message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            await user.add()
-        except rebootpy.DuplicateFriendship as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_duplicate_friendship',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.FriendshipRequestAlreadySent as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_friendship_request_already_sent',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.MaxFriendshipsExceeded as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_max_friendships_exceeded_send',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.InviteeMaxFriendshipRequestsExceeded as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_invitee_max_friendship_requests_exceeded',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.Forbidden as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_forbidden_send',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            m = 'errors.com.epicgames.friends.outgoing_friendships_limit_exceeded'
-            if isinstance(e, rebootpy.HTTPException) and e.message_code == m:
-                self.debug_print_exception(e)
-                text = self.l(
-                    'error_max_outgoing_requests_exceeded',
-                    self.name(user)
-                )
-                self.send(
-                    text,
-                    add_p=self.time,
-                    file=sys.stderr
-                )
-                if message is not None:
-                    await message.reply(text)
-            else:
-                self.print_exception(e)
-                text = self.l(
-                    'error_while_accepting_friend_request',
-                    self.name(user)
-                )
-                self.send(
-                    text,
-                    add_p=self.time,
-                    file=sys.stderr
-                )
-                if message is not None:
-                    await message.reply(text)
-            return e
-
-    async def remove_friend(self, friend: rebootpy.Friend,
-                            message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            await friend.remove()
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_removing_friend',
-                self.name(friend)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def accept_request(self, request: rebootpy.IncomingPendingFriend,
-                             message: Optional[MyMessage] = None) -> Union[rebootpy.Friend, Exception]:
-        try:
-            return await request.accept()
-        except rebootpy.DuplicateFriendship as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_duplicate_friendship',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.FriendshipRequestAlreadySent as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_friendship_request_already_sent',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.MaxFriendshipsExceeded as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_max_friendships_exceeded_accept',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.InviteeMaxFriendshipsExceeded as e:
-            self.debug_print_exception(e)
-            text = self.l(
-                'error_invitee_max_friendships_exceeded',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_accepting_friend_request',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def decline_request(self, request: Union[rebootpy.IncomingPendingFriend, rebootpy.OutgoingPendingFriend],
-                              message: Optional[MyMessage] = None) -> Optional[Union[rebootpy.Friend, Exception]]:
-        try:
-            if isinstance(request, rebootpy.IncomingPendingFriend):
-                return await request.decline()
-            else:
-                return await request.cancel()
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_declining_fiend_request',
-                self.name(request)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def join_party_friend(self, friend: rebootpy.Friend,
-                                message: Optional[MyMessage] = None) -> Union[rebootpy.ClientParty, Exception]:
-        presence = friend.last_presence
-        party = None
-        if presence is not None and presence.party is not None:
-            party = presence.party
-        try:
-            return await friend.join_party()
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal' or party is None:
-                text = self.l(
-                    'already_member_of_this_party_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'already_member_of_this_party_friend_info',
-                    self.name(friend),
-                    party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.PartyIsFull as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal' or party is None:
-                text = self.l(
-                    'party_full_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'party_full_friend_info',
-                    self.name(friend),
-                    party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.NotFound as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal' or party is None:
-                text = self.l(
-                    'party_not_found_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'party_not_found_friend_info',
-                    self.name(friend),
-                    party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.Forbidden as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal' or party is None:
-                text = self.l(
-                    'not_allowed_to_join_this_party_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'not_allowed_to_join_this_party_friend_info',
-                    self.name(friend),
-                    party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            if self.config['loglevel'] == 'normal' or party is None:
-                text = self.l(
-                    'error_while_joining_party_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'error_while_joining_party_friend_info',
-                    self.name(friend),
-                    party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def join_party_id(self, party_id: str,
-                            message: Optional[MyMessage] = None) -> rebootpy.ClientParty:
-        try:
-            return await self.join_party(party_id=party_id)
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l('already_member_of_this_party')
-            else:
-                text = self.l(
-                    'already_member_of_this_party_info',
-                    party_id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.PartyIsFull as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l('party_full')
-            else:
-                text = self.l(
-                    'party_full_info',
-                    party_id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.NotFound as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l('party_not_found')
-            else:
-                text = self.l(
-                    'party_not_found_info',
-                    party_id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.Forbidden as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l('not_allowed_to_join_this_party')
-            else:
-                text = self.l(
-                    'not_allowed_to_join_this_party_info',
-                    party_id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l('error_while_joining_party')
-            else:
-                text = self.l(
-                    'error_while_joining_party_info',
-                    party_id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def send_join_request(self, friend: rebootpy.Friend,
-                                message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            await friend.request_to_join()
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l(
-                    'already_member_of_this_party_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'already_member_of_this_party_friend_info',
-                    self.name(friend),
-                    self.party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l(
-                    'error_while_inviting_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'error_while_inviting_friend_info',
-                    self.name(friend),
-                    self.party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def invite_friend(self, friend: rebootpy.Friend,
-                            message: Optional[MyMessage] = None) -> rebootpy.SentPartyInvitation:
-        try:
-            await friend.invite()
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            if self.party.get_member(friend.id) is not None:
-                if self.config['loglevel'] == 'normal':
-                    text = self.l(
-                        'already_member_of_this_party_friend',
-                        self.name(friend)
-                    )
-                else:
-                    text = self.l(
-                        'already_member_of_this_party_friend_info',
-                        self.name(friend),
-                        self.party.id
-                    )
-            else:
-                if self.config['loglevel'] == 'normal':
-                    text = self.l('party_full')
-                else:
-                    text = self.l(
-                        'party_full_info',
-                        self.party.id
-                    )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            if self.config['loglevel'] == 'normal':
-                text = self.l(
-                    'error_while_inviting_friend',
-                    self.name(friend)
-                )
-            else:
-                text = self.l(
-                    'error_while_inviting_friend_info',
-                    self.name(friend),
-                    self.party.id
-                )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def user_block(self, user: Type[rebootpy.user.UserBase],
-                         message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            await user.block()
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_blocking_user',
-                self.name(user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def user_unblock(self, blocked_user: rebootpy.BlockedUser,
-                           message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            await blocked_user.unblock()
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_unblocking_user',
-                self.name(blocked_user)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def ensure_party_leader(self, force_refresh: bool = False) -> bool:
-        party = getattr(self, 'party', None)
-        me = getattr(party, 'me', None)
-        if party is None or me is None:
-            return False
-        if me.leader and not force_refresh:
-            return True
-        party_id = party.id
-        try:
-            party_data = await self.http.party_lookup(party_id)
-        except rebootpy.HTTPException as error:
-            if getattr(error, 'message_code', None) == 'errors.com.epicgames.social.party.party_not_found':
-                return False
-            raise
-        if self.party is not party or self.party.id != party_id:
-            return False
-        captain_id = party_data.get('captain_id')
-        if captain_id is None:
-            return False
-        leader = party.get_member(captain_id)
-        if leader is None and captain_id == self.user.id:
-            leader = party.me
-        if leader is None:
-            return False
-        party._update_roles(leader)
-        return party.me.leader
-
-    async def promote_member(self, member: rebootpy.PartyMember,
-                             message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            if not await self.ensure_party_leader():
-                raise rebootpy.Forbidden('You must be the party leader to perform this action')
-            await member.promote()
-        except rebootpy.Forbidden as e:
-            self.debug_print_exception(e)
-            text = self.l('not_a_party_leader')
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            text = self.l('already_party_leader')
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_promoting_leader',
-                self.name(member)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def kick_member(self, member: rebootpy.PartyMember,
-                          message: Optional[MyMessage] = None) -> Optional[Exception]:
-        try:
-            if not await self.ensure_party_leader():
-                raise rebootpy.Forbidden('You must be the party leader to perform this action')
-
-            party = self.party
-            party_id = party.id
-            member_id = member.id
-
-            if member_id == self.user.id:
-                raise rebootpy.PartyError("You can't kick yourself")
-
-            if (self.is_creating_party() or member.party is not party
-                    or party.get_member(member_id) is None):
-                raise RuntimeError(self.l('error_while_kicking_member', self.name(member)))
-
-            await self.http.party_kick_member(party_id, member_id)
-
-            for attempt in range(5):
-                if self.party is not party or self.party.id != party_id:
-                    raise RuntimeError(self.l('error_while_kicking_member', self.name(member)))
-
-                data = await self.http.party_lookup(party_id)
-                members = data.get('members')
-                if not isinstance(members, list):
-                    raise RuntimeError(self.l('error_while_kicking_member', self.name(member)))
-
-                if not any(
-                    m.get('account_id', m.get('accountId')) == member_id
-                    for m in members
-                ):
-                    return None
-
-                if attempt < 4:
-                    await asyncio.sleep(0.4)
-
-            raise RuntimeError(self.l('error_while_kicking_member', self.name(member)))
-        except rebootpy.Forbidden as e:
-            self.debug_print_exception(e)
-            text = self.l('not_a_party_leader')
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                try:
-                    await message.reply(text)
-                except rebootpy.ChatError as reply_error:
-                    self.debug_print_exception(reply_error)
-            return e
-        except rebootpy.PartyError as e:
-            self.debug_print_exception(e)
-            text = self.l('cant_kick_myself')
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                try:
-                    await message.reply(text)
-                except rebootpy.ChatError as reply_error:
-                    self.debug_print_exception(reply_error)
-            return e
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_kicking_member',
-                self.name(member)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                try:
-                    await message.reply(text)
-                except rebootpy.ChatError as reply_error:
-                    self.debug_print_exception(reply_error)
-            return e
-
-
-    async def hide_member(self, member: rebootpy.PartyMember,
-                          message: Optional[str] = None) -> Optional[Exception]:
-        try:
-            await self.party.hide(member)
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_hiding_member',
-                self.name(member)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def show_member(self, member: rebootpy.PartyMember,
-                          message: Optional[str] = None) -> Optional[Exception]:
-        try:
-            await self.party.show(member)
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_showing_member',
-                self.name(member)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-    async def swap_member(self, member: rebootpy.PartyMember,
-                          message: Optional[str] = None) -> Optional[Exception]:
-        try:
-            await member.swap_position()
-        except Exception as e:
-            self.print_exception(e)
-            text = self.l(
-                'error_while_swapping_member',
-                self.name(member)
-            )
-            self.send(
-                text,
-                add_p=self.time,
-                file=sys.stderr
-            )
-            if message is not None:
-                await message.reply(text)
-            return e
-
-
-    @property
-    def owner(self) -> list:
-        return list(self._owner.values())
-
-    def is_owner(self, user_id: str) -> bool:
-        return self._owner.get(user_id) is not None
-
-    @property
-    def whitelist(self) -> list:
-        return list(self._whitelist.values())
-
-    def is_whitelist(self, user_id: str) -> bool:
-        return self._whitelist.get(user_id) is not None
-
-    @property
-    def blacklist(self) -> list:
-        return list(self._blacklist.values())
-
-    def is_blacklist(self, user_id: str) -> bool:
-        return self._blacklist.get(user_id) is not None
-
-    @property
-    def botlist(self) -> list:
-        return self.bot.loaded_client_ids + list(self._botlist.values())
-
-    def is_bot(self, user_id: str) -> bool:
-        if user_id in self.bot.loaded_client_ids:
-            return True
-        if self._botlist.get(user_id) is not None:
-            return True
-        return False
-
-    @property
-    def invitelist(self) -> list:
-        return list(self._invitelist.values())
-
-    def is_invitelist(self, user_id: str) -> bool:
-        return self._invitelist.get(user_id) is not None
-
-    def get_user_type(self, user_id: Optional[str]) -> str:
-        if self.is_owner(user_id):
-            return 'owner'
-        elif self.is_whitelist(user_id):
-            return 'whitelist'
-        elif self.is_blacklist(user_id):
-            return 'blacklist'
-        elif self.is_bot(user_id):
-            return 'bot'
-        elif user_id is None or len(user_id) == auth.id_len:
-            return 'owner'
-        return 'user'
-
-    def is_for(self, config_key: str, user_type: str, fortnite: Optional[bool] = True) -> bool:
-        if fortnite:
-            config = self.config['fortnite'][config_key]
-        else:
-            config = self.config[config_key]
-        if config is None:
-            return False
-        return user_type in config
-
-    def is_outfit_mimic_for(self, user_type: str) -> bool:
-        return self.is_for('outfit_mimic_for', user_type)
-
-    def is_outfit_lock_for(self, user_type: str) -> bool:
-        return self.is_for('outfit_lock_for', user_type)
-
-    def is_backpack_mimic_for(self, user_type: str) -> bool:
-        return self.is_for('backpack_mimic_for', user_type)
-
-    def is_backpack_lock_for(self, user_type: str) -> bool:
-        return self.is_for('backpack_lock_for', user_type)
-
-    def is_pickaxe_mimic_for(self, user_type: str) -> bool:
-        return self.is_for('pickaxe_mimic_for', user_type)
-
-    def is_pickaxe_lock_for(self, user_type: str) -> bool:
-        return self.is_for('pickaxe_lock_for', user_type)
-
-    def is_emote_mimic_for(self, user_type: str) -> bool:
-        return self.is_for('emote_mimic_for', user_type)
-
-    def is_emote_lock_for(self, user_type: str) -> bool:
-        return self.is_for('emote_lock_for', user_type)
-
-    def is_ng_platform_for(self, user_type: str) -> bool:
-        return self.is_for('ng_platform_for', user_type)
-
-    def is_ng_name_for(self, user_type: str) -> bool:
-        return self.is_for('ng_name_for', user_type)
-
-    def is_accept_invite_for(self, user_type: str) -> bool:
-        return self.is_for('accept_invite_for', user_type)
-
-    def is_decline_invite_when(self, user_type: str) -> bool:
-        return self.is_for('decline_invite_when', user_type)
-
-    def is_invite_interval_for(self, user_type: str) -> bool:
-        return self.is_for('invite_interval_for', user_type)
-
-    def is_accept_friend_for(self, user_type: str) -> bool:
-        return self.is_for('accept_friend_for', user_type)
-
-    def is_whisper_enable_for(self, user_type: str) -> bool:
-        return self.is_for('whisper_enable_for', user_type)
-
-    def is_party_chat_enable_for(self, user_type: str) -> bool:
-        return self.is_for('party_chat_enable_for', user_type)
-
-    def is_accept_join_for(self, user_type: str) -> bool:
-        return self.is_for('accept_join_for', user_type)
-
-    def is_chat_max_for(self, user_type: str) -> bool:
-        return self.is_for('chat_max_for', user_type)
-
-    def is_hide_for(self, user_type: str) -> bool:
-        return self.is_for('hide_for', user_type)
-
-    def is_ng_word_for(self, user_type: str) -> bool:
-        return self.is_for('ng_word_for', user_type, fortnite=False)
-
-    async def get_user_operation_func(self, config_key: str, user_id: str, fortnite: Optional[bool] = True) -> List[Callable]:
-        if fortnite:
-            config = self.config['fortnite'][config_key]
-        else:
-            config = self.config[config_key]
-
-        user = await self.fetch_user(user_id, cache=True)
-        if user is None:
-            return []
-
-        is_leader = getattr(getattr(getattr(self, 'party', None), 'me', None), 'leader', False)
-
-        functions = []
-        if config:
-            for operation in config:
-                if operation == 'kick':
-                    if getattr(self, 'party', None) is None or not is_leader:
-                        continue
-                    member = self.party.get_member(user.id)
-                    if member is None:
-                        continue
-                    functions.append(member.kick)
-                elif operation == 'remove':
-                    friend = self.get_friend(user.id)
-                    if friend is None:
-                        continue
-                    functions.append(friend.remove)
-                elif operation == 'block':
-                    if user is None:
-                        continue
-                    functions.append(user.block)
-                elif operation == 'blacklist':
-                    functions.append(partial(self.add_to_blacklist, user=user))
-
-        return functions
-
-    def get_ng_platform_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('ng_platform_operation', user_id)
-
-    def get_ng_name_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('ng_name_operation', user_id)
-
-    def get_permission_command_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('permission_command_operation', user_id)
-
-    def get_chat_max_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('chat_max_operation', user_id)
-
-    def get_blacklist_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('blacklist_operation', user_id)
-
-    def get_botlist_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('botlist_operation', user_id)
-
-    def get_ng_word_operation(self, user_id: str) -> Awaitable:
-        return self.get_user_operation_func('ng_word_operation', user_id, fortnite=False)
-
-    def get_user_str(self, user: Type[rebootpy.user.UserBase]) -> str:
-        return ('<User id={0.id!r} display_name={0.display_name!r} '
-                'external_auths={1!r}>'.format(
-                    user,
-                    [self.get_external_auth_str(auth)
-                        for auth in user.external_auths]
-                ))
-
-    def get_external_auth_str(self, external_auth: rebootpy.ExternalAuth) -> str:
-        return ('<ExternalAuth external_id={0.external_id!r} '
-                'external_display_name={0.external_display_name!r} '
-                'type={0.type!r}>'.format(external_auth))
-
-    def get_config_user_id(self, text: str) -> Optional[str]:
-        if text is None:
-            return None
-        match = self.config_user_pattern.match(text)
-        if match is None:
-            return None
-        return match.group('id')
-
-    def add_to_blacklist(self, user: rebootpy.User) -> None:
-        if user.id not in self._blacklist:
-            self.config['fortnite']['blacklist'].append(self.get_user_str(user))
-            self._blacklist[user.id] = user
-
-    def get_config_item_path(self, text: str) -> str:
-        return self.bot.get_config_item_path(text)
-
-    def get_config_playlist_id(self, text: str) -> str:
-        return self.bot.get_config_playlist_id(text)
-
-    def get_config_variant(self, text: str) -> str:
-        return self.bot.get_config_variant(text)
-
-    @property
-    def party_id(self) -> Optional[str]:
-        return getattr(getattr(self, 'party', None), 'id', None)
-
-    @property
-    def variables(self) -> dict:
-        user = getattr(self, 'user', None)
-        party = getattr(self, 'party', None)
-        uptime = (datetime.datetime.now() - self.booted_at) if self.booted_at is not None else None
-        if uptime is not None:
-            d, h, m, s = self.bot.convert_td(uptime)
-        else:
-            d = h = m = s = None
-        online_friends = [f for f in self.friends if f.is_online()]
-        offline_friends = [f for f in self.friends if not f.is_online()]
-        return {
-            **globals(),
-            'self': self,
-            'client': self,
-            'discord_bot': self.discord_client,
-            'party': party,
-            'party_id': getattr(party, 'id', None),
-            'party_size': getattr(party, 'member_count', None),
-            'party_max_size': getattr(party, 'config', {}).get('max_size'),
-            'friends': self.friends,
-            'friend_count': len(self.friends),
-            'online_friend_count': len(online_friends),
-            'online_friends': online_friends,
-            'offline_friends': offline_friends,
-            'offline_friend_count': len(offline_friends),
-            'pending_friends': self.pending_friends,
-            'pending_count': len(self.pending_friends),
-            'incoming_pending_friends': self.incoming_pending_friends,
-            'incoming_pending_count': len(self.incoming_pending_friends),
-            'outgoing_pending_friends': self.outgoing_pending_friends,
-            'outgoing_pending_count': len(self.outgoing_pending_friends),
-            'blocked_users': self.blocked_users,
-            'block_count': len(self.blocked_users),
-            'display_name': getattr(user, 'display_name', None),
-            'account_id': getattr(user, 'id', None),
-            'uptime': uptime,
-            'uptime_days': d,
-            'uptime_hours': h,
-            'uptime_minutes': m,
-            'uptime_seconds': s,
-            'owner': self.owner,
-            'whitelist': self.whitelist,
-            'blacklist': self.blacklist,
-            'botlist': self.botlist,
-            'invitelist': self.invitelist
-        }
-
-    @property
-    def variables_without_self(self) -> dict:
-        var = self.variables
-        var.pop('self')
-        return var
-
-    def convert_td(self, td: datetime.timedelta) -> Tuple[int, int, int, int]:
-        return self.bot.convert_td(td)
-
-    def eval_format(self, text: str, variables: dict) -> str:
-        return self.bot.eval_format(text, variables)
-
-    def get_list_index(self, data: list, index: int, default: Optional[str] = None) -> Any:
-        return self.bot.get_list_index(data, index, default)
-
-    def get_dict_key(self, data: dict, keys: list,
-                     func: Optional[Callable] = None) -> Any:
-        return self.bot.get_dict_key(data, keys, func)
-
-    def get_dict_key_default(self, data: dict, keys: list, default: Any,
-                             func: Optional[Callable] = None) -> Any:
-        return self.bot.get_dict_key_default(data, keys, default, func)
-
-    def cleanup_channel_name(self, text: str) -> str:
-        return self.bot.cleanup_channel_name(text)
-
-    def l(self, key: str, *args: tuple, default: Optional[str] = '', **kwargs: dict) -> LocalizedText:
-        return LocalizedText(self.bot, ['client', key], default, *args, **kwargs)
-
-    def send(self, content: Any,
-             user_name: Optional[str] = None,
-             color: Optional[Callable] = None,
-             add_p: Optional[Union[Callable, List[Callable]]] = None,
-             add_d: Optional[Union[Callable, List[Callable]]] = None,
-             file: Optional[io.IOBase] = None) -> Optional[str]:
-        file = file or sys.stdout
+    async def reply(self, content: str) -> None:
         content = str(content)
-        color = color or (lambda x: x)
-        add_p = (add_p if isinstance(add_p, list) else [add_p or (lambda x: x)])
-        add_d = (add_d if isinstance(add_d, list) else [add_d or (lambda x: x)])
-        if file == sys.stderr:
-            add_d.append(self.discord_error)
-        if not self.config['no_logs']:
-            text = content
-            for func in add_p:
-                text = func(text)
-            print(color(text), file=file)
-
-        if self.webhook:
-            content = discord.utils.escape_markdown(content)
-            name = user_name or self.user.display_name
-            text = content
-            for func in add_d:
-                text = func(text)
-            self.webhook.send(text, name)
-
-    def now(self) -> str:
-        return self.bot.now()
-
-    def time(self, text: str) -> str:
-        return f'[{self.now()}] [{self.user.display_name}] {text}'
-
-    def time_party(self, text: str, name: Optional[str] = None) -> str:
-        name = name or self.user.display_name
-        if getattr(self, 'party', None) is None:
-            return self.time(text)
-        else:
-            if self.config['loglevel'] == 'normal':
-                return (f'[{self.now()}] [{self.l("party")}] '
-                        f'[{name}] {text}')
-            else:
-                return (f'[{self.now()}] [{self.l("party")}/{self.party.id}] '
-                        f'[{name}] {text}')
-
-    def discord_party(self, text: str, name: Optional[str] = None) -> str:
-        name = name or self.user.display_name
-        if getattr(self, 'party', None) is None:
-            return self.time(text)
-        else:
-            if self.config['loglevel'] == 'normal':
-                return (f'[{self.l("party")}] '
-                        f'[{name}] {text}')
-            else:
-                return (f'[{self.l("party")}/{self.party.id}] '
-                        f'[{name}] {text}')
-
-    def discord_error(self, text: str) -> str:
-        return self.bot.discord_error(text)
-
-    def debug_message(self, text: str) -> str:
-        return self.bot.debug_message(text)
-
-    def name(self, user: Optional[rebootpy.User] = None, *, force_info: Optional[bool] = False) -> str:
-        user = user or self.user
-        if self.config['loglevel'] == 'normal' and not force_info:
-            return user.display_name
-        else:
-            append = ''
-            if getattr(user, 'platform', None) is not None:
-                if getattr(user, 'input', None) is not None:
-                    append += f' [{self.platform_to_str(user.platform)}/{user.input}]'
+        if isinstance(self.message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None))))):
+            await self.message.reply(content)
+        elif isinstance(self.message, discord.Message):
+            lines = content.split('\n')
+            texts = []
+            num = 0
+            for line in lines:
+                line += '\n'
+                if self.client.bot.get_list_index(texts, num) is None:
+                    texts.append('')
+                if len(texts[num] + line) < 2000:
+                    texts[num] += line
                 else:
-                    append += f' [{self.platform_to_str(user.platform)}]'
-            elif getattr(user, 'input', None) is not None:
-                append += f' [{user.input}]'
-            if getattr(user, 'nickname', None) is None:
-                return '{0.display_name} / {0.id}{1}'.format(user, append)
-            else:
-                return '{0.nickname}({0.display_name}) / {0.id}{1}'.format(user, append)
-
-    def localized_cosmetic(self, item_id: str) -> Optional[dict]:
-        lang = self.config.get('lang', 'en')
-        item_dir = Path(getattr(self.bot, 'item_dir', 'item'))
-        data_path = item_dir / f'items_{lang}.json'
-        try:
-            with data_path.open('r', encoding='utf-8') as file:
-                data = json.load(file)
-            items = data.get('items', {})
-            if isinstance(items, dict):
-                cosmetic = items.get(item_id.casefold())
-                if cosmetic is None:
-                    cosmetic = next((value for value in items.values()
-                                     if isinstance(value, dict) and str(value.get('id', '')).casefold() == item_id.casefold()), None)
-                if isinstance(cosmetic, dict) and cosmetic.get('name'):
-                    return cosmetic
-        except (OSError, ValueError, TypeError):
-            pass
-        if lang == self.config.get('search_lang'):
-            for collection in (self.searcher.main_items, self.searcher.sub_items):
-                cosmetic = next((value for value in collection.values()
-                                 if isinstance(value, dict) and str(value.get('id', '')).casefold() == item_id.casefold()), None)
-                if cosmetic is not None:
-                    return cosmetic
-        return None
-
-    def name_cosmetic(self, item: dict) -> str:
-        if self.config['loglevel'] == 'normal':
-            return item['name']
-        else:
-            return f'{item["name"]} | {item["id"]}'
-
-    def format_exception(self, exc: Optional[Exception] = None) -> str:
-        return self.bot.print_exception(exc)
-
-    def print_exception(self, exc: Optional[Exception] = None) -> None:
-        return self.bot.print_exception(exc)
-
-    def debug_print_exception(self, exc: Optional[Exception] = None) -> None:
-        return self.bot.debug_print_exception(exc)
-
-    def section(self, member: Optional[rebootpy.PartyMember] = None) -> int:
-        member = member or self.party.me
-        base = member.meta.get_prop('Default:FrontendEmote_j')
-        return base['FrontendEmote']['emoteSection']
-
-    def asset(self, item: str,
-              member: Optional[rebootpy.PartyMember] = None) -> Optional[str]:
-        member = member or self.party.me
-        p = self.ASSET_CONVERTER.get(item)
-        if p is None or member is None:
-            return None
-        return p.fget(member)
-
-    def variants(self, item: str,
-                 member: Optional[rebootpy.PartyMember] = None) -> list:
-        member = member or self.party.me
-        p = self.VARIANTS_CONVERTER.get(item)
-        if p is None or member is None:
-            return []
-        return p.fget(member)
-
-    def platform_to_str(self, platform: rebootpy.Platform) -> str:
-        return self.PLATFORM_CONVERTER.get(platform)
-
-    def find_users(self, user: str, *,
-                   mode: FindUserMode,
-                   method: FindUserMatchMethod,
-                   users: List[rebootpy.User] = None,
-                   me: Optional[rebootpy.User] = None,
-                   ) -> List[rebootpy.User]:
-        if me is not None and user in self.commands['me']:
-            return [me]
-
-        if mode is FindUserMode.NAME_ID:
-            name_users = self.find_users(
-                user,
-                users=users,
-                mode=FindUserMode.DISPLAY_NAME,
-                method=method
-            )
-            id_users = self.find_users(
-                user,
-                users=users,
-                mode=FindUserMode.ID,
-                method=method
-            )
-            name_users += [u for u in id_users if u not in name_users]
-            return name_users
-        if self.config['case_insensitive']:
-            user = jaconv.kata2hira(user.casefold())
-        if self.config['convert_kanji']:
-            user = self.bot.converter.do(user)
-
-        if users is None:
-            users = self._caches.values()
-        _users = []
-        for u in users:
-            if self.get_as_user(u) in _users:
-                continue
-            user_name = u.display_name
-            if self.config['case_insensitive']:
-                user_name = jaconv.kata2hira(user_name.casefold())
-            if self.config['convert_kanji']:
-                user_name = self.bot.converter.do(user_name)
-
-            if method is FindUserMatchMethod.FULL:
-                if mode is FindUserMode.DISPLAY_NAME:
-                    if u.display_name == user:
-                        _users.append(self.get_as_user(u))
-                elif mode is FindUserMode.ID:
-                    if u.id == user:
-                        _users.append(self.get_as_user(u))
-
-            elif method is FindUserMatchMethod.CONTAINS:
-                if mode is FindUserMode.DISPLAY_NAME:
-                    if user in user_name:
-                        _users.append(self.get_as_user(u))
-                elif mode is FindUserMode.ID:
-                    if user in u.id:
-                        _users.append(self.get_as_user(u))
-
-            elif method is FindUserMatchMethod.STARTS:
-                if mode is FindUserMode.DISPLAY_NAME:
-                    if user_name.startswith(user):
-                        _users.append(self.get_as_user(u))
-                elif mode is FindUserMode.ID:
-                    if u.id.startswith(user):
-                        _users.append(self.get_as_user(u))
-
-            elif method is FindUserMatchMethod.ENDS:
-                if mode is FindUserMode.DISPLAY_NAME:
-                    if user_name.endswith(user):
-                        _users.append(self.get_as_user(u))
-                elif mode is FindUserMode.ID:
-                    if u.id.endswith(user):
-                        _users.append(self.get_as_user(u))
-        return _users
-
-    async def aexec(self, body: str, variables: dict) -> Optional[bool]:
-        flag = False
-        for line in body.split('\n'):
-            match = self.return_pattern.fullmatch(line)
-            if match is not None:
-                flag = True
-                break
-        try:
-            _, o, _ = await self.bot.aexec(body, variables)
-            print(o)
-            if flag:
-                return False
-        except Exception as e:
-            def cleanup(code_context):
-                return ''.join([i.strip('\n ') for i in code_context])
-
-            self.bot.send(
-                ('Ignoring exception\n'
-                 f'body: {body}\n'
-                 'Traceback\n'
-                 + '\n'.join([(f'  File "{stack.filename}", line {stack.lineno}, in {stack.function}'
-                               + (f'\n    {cleanup(stack.code_context)}' if stack.code_context else ''))
-                              for stack in reversed(inspect.stack()[1:])])
-                 + f'{e.__class__.__name__}: {e}'),
-                file=sys.stderr
-            )
-            return None
-        return True
-
-    async def exec_event(self, event: str, variables: dict) -> None:
-        if self.config['fortnite']['exec'][event]:
-            ret = await self.aexec(
-                '\n'.join(self.config['fortnite']['exec'][event]),
-                variables
-            )
-            if ret is None:
-                for line in self.config['fortnite']['exec'][event]:
-                    try:
-                        await self.bot.aexec(line, variables)
-                    except Exception as e:
-                        mes = DummyMessage(self, None, content=line, author=DummyUser())
-                        await self.process_command(MyMessage(self, mes), None)
-                        if self.config['loglevel'] == 'debug':
-                            self.send(
-                                mes.result,
-                                color=yellow
-                            )
-            else:
-                return ret
-
-    async def update_owner(self) -> None:
-        self._owner = {}
-        if self.config['fortnite']['owner'] is None:
-            return
-        owners = [(self.get_config_user_id(owner)
-                   or owner)
-                  for owner in self.config['fortnite']['owner']]
-        users = await self.fetch_multiple_users(owners)
-        for num, owner in enumerate(owners):
-            user = users.get(owner)
-            if user is None:
-                user = await self.fetch_user(owner, cache=True)
-            if user is None:
-                self.send(
-                    self.l(
-                        'owner_not_found',
-                        owner
-                    ),
-                    add_p=self.time
-                )
-            else:
-                self._owner[user.id] = user
-                self.send(
-                    self.l(
-                        'owner_log',
-                        self.name(user)
-                    ),
-                    color=green,
-                    add_p=self.time
-                )
-                self.config['fortnite']['owner'][num] = self.get_user_str(user)
-                if not self.has_friend(user.id) and self.is_accept_friend_for(user.id):
-                    pending = self.get_incoming_pending_friend(user.id)
-                    if pending is not None:
-                        await self.accept_request(pending)
-                    elif not self.is_outgoing_pending(user.id):
-                        await self.send_friend_request(user)
-
-    async def _update_user_list(self, lists: list, data_list: list) -> None:
-        users = await self.fetch_multiple_users(sum(lists, []))
-        for (keys, add_friend), list_users in zip(data_list, lists):
-            attr = keys[-1]
-            setattr(self, f'_{attr}', {})
-            for num, list_user in enumerate(list_users):
-                user = users.get(list_user)
-                if user is None:
-                    user = await self.fetch_user(list_user, cache=True)
-                if user is None:
-                    self.send(
-                        self.l(
-                            'list_user_not_found',
-                            self.l(attr),
-                            list_user
-                        ),
-                        add_p=self.time,
-                        file=sys.stderr
-                    )
-                else:
-                    text = self.bot.eval_dict(self.config, keys)
-                    exec(f'self.config{text}[{num}] = self.get_user_str(user)')
-
-                    getattr(self, f'_{attr}')[user.id] = user
-                    self.send(
-                        self.l(
-                            'list_user_log',
-                            self.l(attr),
-                            self.name(user)
-                        ),
-                        color=green,
-                        add_p=self.time
-                    )
-                    if add_friend:
-                        if not self.has_friend(user.id) and self.is_accept_friend_for(user.id):
-                            pending = self.get_incoming_pending_friend(user.id)
-                            if pending is not None:
-                                await self.accept_request(pending)
-                            elif not self.is_outgoing_pending(user.id):
-                                await self.send_friend_request(user)
-                        friend = self.get_friend(user.id)
-                        if friend is not None:
-                            getattr(self, f'_{attr}')[user.id] = friend
-
-    async def update_user_lists(self) -> None:
-        data_list = [
-            (['fortnite', 'whitelist'], False),
-            (['fortnite', 'blacklist'], False),
-            (['fortnite', 'invitelist'], True),
-            (['fortnite', 'botlist'], False)
-        ]
-        lists = [self.bot.get_dict_key(self.config, keys)
-                 for keys, _ in data_list
-                 if self.bot.get_dict_key(self.config, keys) is not None]
-        lists = [[(self.get_config_user_id(user)
-                   or user)
-                  for user in list_users]
-                 for list_users in lists]
-        await self._update_user_list(
-            lists,
-            data_list
-        )
-
-    async def _update_multiple_select_list(self, lists: list, keys_list: list) -> None:
-        users = await self.fetch_multiple_users(sum(lists, []))
-        for keys, list_users in zip(keys_list, lists):
-            attr = keys[-1]
-            setattr(self, f'_{attr}', {})
-            for num, list_user in enumerate(list_users):
-                if list_user in ['user', 'whitelist',
-                                 'blacklist', 'owner', 'bot']:
-                    getattr(self, f'_{attr}')[list_user] = list_user
-                    continue
-                user = users.get(list_user)
-                if user is None:
-                    user = await self.fetch_user(list_user, cache=True)
-                if user is not None:
-                    text = self.bot.eval_dict(self.config, keys)
-                    exec(f'self.config{text}[{num}] = self.get_user_str(user)')
-                    getattr(self, f'_{attr}')[user.id] = user
-                    self.send(
-                        self.l(
-                            'multiple_select_user_log',
-                            attr,
-                            self.name(user)
-                        ),
-                        color=green,
-                        add_p=self.time
-                    )
-                else:
-                    self.send(
-                        self.l(
-                            'multiple_select_user_not_found',
-                            attr,
-                            list_user
-                        ),
-                        add_p=self.time,
-                        file=sys.stderr
-                    )
-
-    async def update_multiple_select_lists(self) -> None:
-        keys_list = [
-            ['fortnite', 'outfit_mimic_for'],
-            ['fortnite', 'outfit_lock_for'],
-            ['fortnite', 'backpack_mimic_for'],
-            ['fortnite', 'backpack_lock_for'],
-            ['fortnite', 'pickaxe_mimic_for'],
-            ['fortnite', 'pickaxe_lock_for'],
-            ['fortnite', 'emote_mimic_for'],
-            ['fortnite', 'emote_lock_for'],
-            ['fortnite', 'accept_invite_for'],
-            ['fortnite', 'decline_invite_when'],
-            ['fortnite', 'whisper_enable_for'],
-            ['fortnite', 'party_chat_enable_for'],
-            ['fortnite', 'hide_for'],
-            ['ng_word_for']
-        ]
-        lists = [self.bot.get_dict_key(self.config, keys)
-                 for keys in keys_list
-                 if self.bot.get_dict_key(self.config, keys) is not None]
-        lists = [[(self.get_config_user_id(user)
-                   or user)
-                  for user in list_users]
-                 for list_users in lists]
-        await self._update_multiple_select_list(
-            lists,
-            keys_list
-        )
-
-    async def ng_check(self, member: rebootpy.PartyMember) -> None:
-        if member.id == self.user.id:
-            return
-
-        if self.is_ng_name_for(self.get_user_type(member.id)):
-            for ng in self.config['fortnite']['ng_names']:
-                flag = False
-                if ng['matchmethod'] == 'full' and member.display_name == ng['word']:
-                    flag = True
-                elif ng['matchmethod'] == 'contains' and ng['word'] in member.display_name:
-                    flag = True
-                elif ng['matchmethod'] == 'starts' and member.display_name.startswith(ng['word']):
-                    flag = True
-                elif ng['matchmethod'] == 'ends' and member.display_name.endswith(ng['word']):
-                    flag = True
-
-                if flag:
-                    functions = await self.get_ng_name_operation(user_id=member.id)
-                    for func in functions:
-                        try:
-                            if asyncio.iscoroutinefunction(func):
-                                await func()
-                            else:
-                                func()
-                        except Exception as e:
-                            self.print_exception(e)
-
-                    if self.config['fortnite']['ng_name_reply']:
-                        var = self.variables
-                        var.update({
-                            'member': member,
-                            'member_display_name': member.display_name,
-                            'member_id': member.id
-                        })
-                        text = self.eval_format(
-                            self.config['fortnite']['ng_name_reply'],
-                            var
-                        )
-                        if self.party.get_member(member.id) is not None:
-                            await self.party.send(text)
-                        else:
-                            friend = self.get_friend(member.id)
-                            if friend is not None:
-                                await friend.send(text)
-
-        if (self.is_ng_platform_for(self.get_user_type(member.id))
-                and self.config['fortnite']['ng_platforms'] is not None
-                and member.platform in self.config['fortnite']['ng_platforms']):
-            functions = await self.get_ng_platform_operation(user_id=member.id)
-            for func in functions:
-                try:
-                    if asyncio.iscoroutinefunction(func):
-                        await func()
+                    if texts[num] == '':
+                        s = [line[i:i + 2000] for i in range(0, len(line), 2000)]
+                        for l in s:
+                            texts[num] = l
+                            num += 1
                     else:
-                        func()
-                except Exception as e:
-                    self.print_exception(e)
+                        num += 1
+                        texts[num] = line
+            for text in texts:
+                await self.message.channel.send(text)
+        elif isinstance(self.message, DummyMessage):
+            self.message.reply(content)
 
-            if self.config['fortnite']['ng_platform_reply']:
-                var = self.variables
-                var.update({
-                    'member': member,
-                    'member_display_name': member.display_name,
-                    'member_id': member.id
-                })
-                text = self.eval_format(
-                    self.config['fortnite']['ng_platform_reply'],
-                    var
-                )
-                if self.party.get_member(member.id) is not None:
-                    await self.party.send(text)
-                else:
-                    friend = self.get_friend(member.id)
-                    if friend is not None:
-                        await friend.send(text)
 
-        items = [
-            'AthenaCharacter',
-            'AthenaBackpack',
-            'AthenaPickaxe',
-            'AthenaDance'
-        ]
-        for item in items:
-            conf = self.bot.convert_backend_type(item)
-            if not self.config['fortnite'][f'ng_{conf}s'] or self.asset(item, member) is None:
-                continue
-            ngs = [ng.lower() for ng in [
-                (self.bot.get_config_item_path(cosmetic)
-                 or cosmetic)
-                for cosmetic in self.config['fortnite'][f'ng_{conf}s']
-            ] if ng is not None]
-            if (self.is_for(f'ng_{conf}_for', self.get_user_type(member.id))
-                    and self.asset(item, member).lower() in ngs):
-                functions = await self.get_user_operation_func(f'ng_{conf}_operation', user_id=member.id)
-                for func in functions:
-                    try:
-                        if asyncio.iscoroutinefunction(func):
-                            await func()
-                        else:
-                            func()
-                    except Exception as e:
-                        self.print_exception(e)
+class Command:
+    def __init__(self, coro: Awaitable, **kwargs) -> None:
+        if not asyncio.iscoroutinefunction(coro):
+            raise TypeError('Command callback must be a coroutine')
 
-                if self.config['fortnite'][f'ng_{conf}_reply']:
-                    var = self.variables
-                    var.update({
-                        'member': member,
-                        'member_display_name': member.display_name,
-                        'member_id': member.id
-                    })
-                    text = self.eval_format(
-                        self.config['fortnite'][f'ng_{conf}_reply'],
-                        var
-                    )
-                    if self.party.get_member(member.id) is not None:
-                        await self.party.send(text)
-                    else:
-                        friend = self.get_friend(member.id)
-                        if friend is not None:
-                            await friend.send(text)
+        async def callback(*args, **kwargs):
+            await coro(self, *args, **kwargs)
 
-    async def ng_word_check(self, message: Union[rebootpy.FriendMessage, rebootpy.PartyMessage]) -> bool:
-        if message.author.id == self.user.id:
-            return True
-        if not self.is_ng_word_for(self.get_user_type(message.author.id)):
-            return True
+        self.callback = callback
 
-        match = None
-        for ng in self.config['ng_words']:
-            flag = False
-            if ng['matchmethod'] == 'full' and any([message.content == word for word in ng['words']]):
-                for word in ng['words']:
-                    if message.content == word:
-                        match = word
-                        break
-                flag = True
-            elif ng['matchmethod'] == 'contains' and any([word in message.content for word in ng['words']]):
-                for word in ng['words']:
-                    if word in message.content:
-                        match = word
-                        break
-                flag = True
-            elif ng['matchmethod'] == 'starts' and any([message.content.startswith(word) for word in ng['words']]):
-                for word in ng['words']:
-                    if message.content.startswith(word):
-                        match = word
-                        break
-                flag = True
-            elif ng['matchmethod'] == 'ends' and any([message.content.endswith(word) for word in ng['words']]):
-                for word in ng['words']:
-                    if message.content.endswith(word):
-                        match = word
-                        break
-                flag = True
+        self.name = kwargs.get('name') or coro.__name__
+        self.usage = kwargs.get('usage')
+        self.discord_required = kwargs.get('discord_required', False)
 
-            if flag:
-                if self.user.id not in self.bot.command_stats:
-                    self.bot.command_stats[self.user.id] = {'commands': {}, 'ngs': {}}
-                stats = self.bot.command_stats[self.user.id]
-                if message.author.id not in stats['ngs']:
-                    stats['ngs'][message.author.id] = {}
-                if match not in stats['ngs'][message.author.id]:
-                    stats['ngs'][message.author.id][match] = 0
-                stats['ngs'][message.author.id][match] += 1
 
-                if stats['ngs'][message.author.id][match] >= ng['count']:
-                    functions = await self.get_ng_word_operation(user_id=message.author.id)
-                    for func in functions:
-                        try:
-                            if asyncio.iscoroutinefunction(func):
-                                await func()
-                            else:
-                                func()
-                        except Exception as e:
-                            self.print_exception(e)
+def command(name: Optional[str] = None,
+            cls: Optional[Command] = None,
+            **attrs: dict) -> callable:
+    cls = cls or Command
 
-                    if self.config['ng_word_reply']:
-                        var = self.variables
-                        var.update({
-                            'message': message,
-                            'author': message.author,
-                            'author_display_name': message.author.display_name,
-                            'author_id': message.author.id
-                        })
-                        text = self.eval_format(
-                            self.config['ng_word_reply'],
-                            var
-                        )
-                        if (self.party.get_member(message.author.id) is not None
-                                and isinstance(message, rebootpy.PartyMessage)):
-                            await self.party.send(text)
-                        else:
-                            friend = self.get_friend(message.author.id)
-                            if friend is not None:
-                                await friend.send(text)
-                return False
-        return True
+    def deco(func):
+        if isinstance(func, Command):
+            raise TypeError('Callback is already a command.')
+        return cls(func, name=name, **attrs)
 
-    async def init_party(self) -> None:
-        if not await self.ensure_party_leader():
-            return
-        party = self.party
-        for member in party.members:
-            if self.party is not party:
-                return
-            if member.id == self.user.id:
-                continue
+    return deco
 
-            if self.party_hides.get(self.party.id) is None:
-                self.party_hides[self.party.id] = []
-            for m in self.party.members:
-                if self.party.me.leader and self.is_hide_for(self.get_user_type(m.id)):
-                    self.party_hides[self.party.id].append(m.id)
-            self.party.update_hide_users(self.party_hides[self.party.id])
 
-            await self.ng_check(member)
+async def add_to_list(attr: str, message: MyMessage, user: fortnitepy.User):
+    client = message.client
 
-            if self.is_blacklist(member.id):
-                functions = await self.get_blacklist_operation(user_id=member.id)
-                for func in functions:
-                    try:
-                        if asyncio.iscoroutinefunction(func):
-                            await func()
-                        else:
-                            func()
-                    except Exception as e:
-                        self.print_exception(e)
-            if self.party.get_member(member.id) is None:
-                continue
-
-            if self.is_bot(member.id):
-                functions = await self.get_botlist_operation(user_id=member.id)
-                for func in functions:
-                    try:
-                        if asyncio.iscoroutinefunction(func):
-                            await func()
-                        else:
-                            func()
-                    except Exception as e:
-                        self.print_exception(e)
-
-        if self.party is not party or not await self.ensure_party_leader():
-            return
-        try:
-            await party.refresh_squad_assignments()
-        except rebootpy.HTTPException as error:
-            if getattr(error, 'message_code', None) == 'errors.com.epicgames.social.party.party_not_found':
-                return
-            raise
-        if self.party is not party or not await self.ensure_party_leader():
-            return
-
-        if (self.party.playlist_info[0].lower().strip()
-                != self.config['fortnite']['party']['playlist'].lower().strip()
-                and self.config['fortnite']['party']['playlist']):
-            await self.party.set_playlist(
-                self.bot.get_config_playlist_id(self.config['fortnite']['party']['playlist'])
-            )
-        if self.party.config['privacy'] != getattr(self.config['fortnite']['party']['privacy'], 'value', self.config['fortnite']['party']['privacy']):
-            await self.party.set_privacy(self.config['fortnite']['party']['privacy'])
-
-    def is_valid_party(self, party_or_member: Union[rebootpy.party.PartyBase, rebootpy.PartyMember]) -> bool:
-        if (self.party_id != (
-                party_or_member.id
-                if isinstance(party_or_member, rebootpy.party.PartyBase) else
-                party_or_member.party.id)):
-            return False
-        return True
-
-    def is_most(self) -> str:
-        name = self.user.display_name
-        member_most = self.party.me
-        for member in self.party.members:
-            if member.id in self.bot.loaded_client_ids:
-                if member.id != self.user.id:
-                    name += f"/{member.display_name}"
-                if member.joined_at < member_most.joined_at:
-                    member_most = member
-        if member_most.id == self.user.id:
-            return name
-        return None
-
-    def invite_interval_callback(self) -> None:
-        self.send(
-            self.l('invite_interval')
-        )
-        self.invite_interval = False
-        self.invite_interval_handle = None
-
-    async def rebooter(self) -> None:
-        await asyncio.sleep(self.config['relogin_in'])
-        await self.restart()
-
-    async def ready_init(self) -> bool:
-        try:
-            await self.update_owner()
-        except Exception as e:
-            self.send(
-                (f'{self.format_exception(e)}\n{e}\n'
-                 + self.l(
-                     'error_while_updating_owner'
-                 )),
-                file=sys.stderr
-            )
-        try:
-            await self.update_user_lists()
-        except Exception as e:
-            self.send(
-                (f'{self.format_exception(e)}\n{e}\n'
-                 + self.l(
-                     'error_while_updating_list'
-                 )),
-                file=sys.stderr
-            )
-        try:
-            await self.update_multiple_select_lists()
-        except Exception as e:
-            self.send(
-                (f'{self.format_exception(e)}\n{e}\n'
-                 + self.l(
-                     'error_while_updating_list'
-                 )),
-                file=sys.stderr
-            )
-        self.bot.save_json('config', self.bot.config)
-
-        for pending in self.incoming_pending_friends:
-            if self.is_accept_friend_for(self.get_user_type(pending.id)):
-                await self.accept_request(pending)
-        return True
-
-    async def status_loop(self) -> None:
-        while True:
-            if self.party is not None:
-                await self.send_presence(self.party.construct_presence())
-            await asyncio.sleep(30)
-
-    async def generate_device_auth(self) -> None:
-        data = await self.auth.generate_device_auth()
-        self.bot.store_device_auth_details(self.client_id, data)
-
-    async def event_device_auth_generate(self, details: dict) -> None:
-        self.bot.store_device_auth_details(self.client_id, details)
-
-    async def event_device_code_generated(self, link):
-        self.bot.send(self.bot.l('confirm_authorization', link))
-
-    async def event_ready(self) -> None:
-
-        display_name = getattr(self.user, 'display_name', None)
-        if display_name:
-            self.config['display_name'] = display_name
-            self.bot.save_json('config', self.bot.config)
-            self.bot.update_device_auth_display_name(self.client_id, display_name)
-
-        self._is_booting = False
-        self.booted_at = datetime.datetime.now()
-        if self.config['relogin_in']:
-            self.loop.create_task(self.rebooter())
-        self.loop.create_task(self.status_loop())
-
-        try:
-            await self.send_presence(self.party.last_raw_status)
-        except Exception as e:
-            self.debug_print_exception(e)
-
-        self.send(
-            self.l(
-                'ready',
-                self.name()
-            ),
-            color=green,
-            add_p=self.time
-        )
-        ret = await self.exec_event('ready', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        await self.ready_init()
-
-    async def event_before_close(self) -> None:
-        self._is_booting = False
-        self.booted_at = None
-        if getattr(self, 'user', None) is None:
-            self.send(
-                self.l(
-                    'close',
-                    self.client_id
-                ),
-                color=green,
-                add_p=lambda x: f'[{self.now()}] [{self.client_id}] {x}'
-            )
-        else:
-            self.send(
-                self.l(
-                    'close',
-                    self.name()
-                ),
-                color=green,
-                add_p=self.time
-            )
-
-    async def event_restart(self) -> None:
-        self.send(
-            self.l(
-                'restart',
-                self.name()
-            ),
-            color=green,
-            add_p=self.time
-        )
-
-
-    async def event_party_join_request(self, request: rebootpy.PartyJoinRequest) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        self.join_requests[request.friend.id] = request
-
-        def remove():
-            if request.friend.id in self.join_requests:
-                self.join_requests.pop(request.friend.id)
-
-        self.loop.call_later((request.expires_at - datetime.datetime.utcnow()).total_seconds(), remove)
-
-        if not self.is_valid_party(request):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_join_request',
-                        self.party_id,
-                        request.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        self.send(
-            self.l(
-                'party_join_request',
-                self.name(request.friend)
-            ),
-            color=blue,
-            add_p=self.time_party,
-            add_d=self.discord_party
-        )
-
-        ret = await self.exec_event('party_join_request', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def event_party_join_request_expire(self, friend: rebootpy.Friend) -> None:
-        if friend.id in self.join_requests:
-            self.join_requests.pop(friend.id)
-
-    async def event_party_invite(self, invitation: rebootpy.ReceivedPartyInvitation) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        self.invites[invitation.sender.id] = invitation
-
-        ret = await self.exec_event('party_invite', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if getattr(self, 'party', None) is not None:
-            for member in self.party.members:
-                user_type = self.get_user_type(invitation.sender.id)
-                if (self.is_decline_invite_when(self.get_user_type(member.id))
-                        and user_type not in ['whitelist', 'owner']):
-                    self.send(
-                        self.l(
-                            ('invite_decline_when'
-                             if self.config['loglevel'] == 'normal' else
-                             'invite_decline_when_info'),
-                            self.name(member),
-                            (self.name(invitation.sender)
-                                if user_type == 'user' else
-                                f'{self.name(invitation.sender)}({self.l(user_type)})'),
-                            invitation.party.id
-                        ),
-                        add_p=self.time
-                    )
-                    await invitation.sender.send(str(self.l(
-                        'reply_invite_decline_when'
-                    )))
-                    await invitation.decline()
-                    return
-
-        if (self.invite_interval_handle is not None
-                and self.invite_interval_handle.when() < self.loop.time()):
-            self.invite_interval = False
-            self.invite_interval_handle = None
-
-        if self.is_invite_interval_for(self.get_user_type(invitation.sender.id)) and self.invite_interval:
-            self.send(
-                self.l(
-                    ('invite_decline'
-                        if self.config['loglevel'] == 'normal' else
-                        'invite_decline_info'),
-                    self.name(invitation.sender),
-                    invitation.party.id
-                ),
-                add_p=self.time
-            )
-            await invitation.sender.send(str(self.l(
-                'reply_invite_decline_interval',
-                int(self.invite_interval_handle.when() - self.loop.time()),
-                client=self
-            )))
-            await invitation.decline()
-            if invitation.sender.id in self.invites:
-                self.invites.pop(invitation.sender.id)
-            return
-
-        if self.is_accept_invite_for(self.get_user_type(invitation.sender.id)):
-            self.send(
-                self.l(
-                    ('invite_accept'
-                     if self.config['loglevel'] == 'normal' else
-                     'invite_accept_info'),
-                    self.name(invitation.sender),
-                    invitation.party.id
-                ),
-                add_p=self.time
-            )
-            await invitation.accept()
-            if self.config['fortnite']['invite_interval']:
-                self.invite_interval = True
-                self.invite_interval_handle = self.loop.call_later(
-                    self.config['fortnite']['invite_interval'],
-                    self.invite_interval_callback
-                )
-        else:
-            self.send(
-                self.l(
-                    ('invite_decline'
-                        if self.config['loglevel'] == 'normal' else
-                        'invite_decline_info'),
-                    self.name(invitation.sender),
-                    invitation.party.id
-                ),
-                add_p=self.time
-            )
-            await invitation.decline()
-            if invitation.sender.id in self.invites:
-                self.invites.pop(invitation.sender.id)
-
-    async def event_party_invite_decline(self, friend: rebootpy.Friend) -> None:
-        if friend.id in self.invites:
-            self.invites.pop(friend.id)
-
-    async def event_party_invite_cancel(self, friend: rebootpy.Friend) -> None:
-        if friend.id in self.invites:
-            self.invites.pop(friend.id)
-
-    async def event_friend_request(self, request: Union[rebootpy.IncomingPendingFriend, rebootpy.OutgoingPendingFriend]) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if request.outgoing:
-            self.send(
-                self.l(
-                    'friend_request_outgoing',
-                    self.name(request)
-                ),
-                add_p=self.time
-            )
-            return
-        self.send(
-            self.l(
-                'friend_request_incoming',
-                self.name(request)
-            ),
-            add_p=self.time
-        )
-
-        ret = await self.exec_event('friend_request', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if self.is_accept_friend_for(self.get_user_type(request.id)):
-            await self.accept_request(request)
-        else:
-            self.send(
-                self.l(
-                    'friend_request_decline',
-                    self.name(request)
-                ),
-                add_p=self.time
-            )
-            await self.decline_request(request)
-
-    async def event_friend_add(self, friend: rebootpy.Friend) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if friend.outgoing:
-            self.send(
-                self.l(
-                    'friend_add_outgoing',
-                    self.name(friend)
-                ),
-                add_p=self.time
-            )
-        else:
-            self.send(
-                self.l(
-                    'friend_add_incoming',
-                    self.name(friend)
-                ),
-                add_p=self.time
-            )
-            if self.is_invitelist(friend.id):
-                self._invitelist[friend.id] = friend
-
-        ret = await self.exec_event('friend_add', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def event_friend_remove(self, friend: rebootpy.Friend) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        self.send(
-            self.l(
-                'friend_remove',
-                self.name(friend)
-            ),
-            add_p=self.time
-        )
-        if self.is_invitelist(friend.id):
-            self._invitelist[friend.id] = self.get_as_user(friend)
-
-        ret = await self.exec_event('friend_remove', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def event_friend_presence(self, before: Optional[rebootpy.Presence], after: rebootpy.Presence) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        friend = after.friend
-        before_status = before.raw.get('status') if before is not None else 'offline'
-        after_status = after.raw.get('status')
-        before_online = before_status not in ('offline', 'unavailable')
-        if after_status not in ('online', 'away', 'offline', 'unavailable'):
-            return
-        after_online = after_status in ('online', 'away')
-        if before_online != after_online:
-            if after_online:
-                await self.exec_event('friend_online', {**locals(), **self.variables})
-            else:
-                await self.exec_event('friend_offline', {**locals(), **self.variables})
-
-    async def event_party_member_join(self, member: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        inviter = None
-        if member.id == self.user.id:
-            invite = discord.utils.find(
-                lambda i: i.sender in self.party.members and i.party.id == self.party.id,
-                self.invites.values()
-            )
-            if invite is not None:
-                inviter = invite.sender
-
-        if not self.is_valid_party(member):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_join',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None:
-            self.send(
-                self.l(
-                    'party_member_join',
-                    self.name(member),
-                    member.party.member_count
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=self.discord_party
-            )
-
-        ret = await self.exec_event('party_member_join', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if (member.id == self.user.id and self.get_config_item_path(self.config['fortnite']['emote']) is not None
-                and self.emote is None and self.emote_section is None):
-            await self.party.me.change_asset(
-                'AthenaDance',
-                self.get_config_item_path(self.config['fortnite']['emote']),
-                section=self.config['fortnite']['emote_section']
-            )
-
-        if self.party_hides.get(self.party.id) is None:
-            self.party_hides[self.party.id] = []
-        if self.party.me.leader and self.is_hide_for(self.get_user_type(member.id)):
-            self.party_hides[self.party.id].append(member.id)
-        self.party.update_hide_users(self.party_hides[self.party.id])
-
-        await self.ng_check(member)
-
-        if self.party.me.leader and member.id == self.user.id:
-            self.loop.create_task(self.init_party())
-
-        local = locals()
-
-        async def send_messages():
-            var = self.variables
-            var.update(local)
-            var.update({
-                'member': member,
-                'member_display_name': member.display_name,
-                'member_id': member.id
-            })
-            if self.config['fortnite']['join_message']:
-                text = self.eval_format(
-                    '\n'.join(self.config['fortnite']['join_message']),
-                    var
-                )
-                try:
-                    await self.party.send(text)
-                except Exception as e:
-                    self.print_exception(e)
-            friend = self.get_friend(member.id)
-            if friend is not None and self.config['fortnite']['join_message_whisper']:
-                text = self.eval_format(
-                    '\n'.join(self.config['fortnite']['join_message_whisper']),
-                    var
-                )
-                try:
-                    await friend.send(text)
-                except Exception as e:
-                    self.print_exception(e)
-
-            if self.config['fortnite']['random_message']:
-                text = self.eval_format(
-                    '\n'.join(
-                        random.choice(self.config['fortnite']['random_message'])
-                    ),
-                    var
-                )
-                try:
-                    await self.party.send(text)
-                    self.send(
-                        self.l(
-                            'random_message',
-                            text
-                        ),
-                        add_p=self.time
-                    )
-                except Exception as e:
-                    self.print_exception(e)
-            if friend is not None and self.config['fortnite']['random_message_whisper']:
-                text = self.eval_format(
-                    '\n'.join(
-                        random.choice(self.config['fortnite']['random_message_whisper'])
-                    ),
-                    var
-                )
-                try:
-                    await friend.send(text)
-                    self.send(
-                        self.l(
-                            'random_message',
-                            text
-                        ),
-                        add_p=self.time
-                    )
-                except Exception as e:
-                    self.print_exception(e)
-
-        self.loop.create_task(send_messages())
-
-        async def add_members():
-            for member in self.party.members:
-                if member.id == self.user.id or self.has_friend(member.id):
-                    continue
-                pending = self.get_incoming_pending_friend(member.id)
-                if pending is not None:
-                    await self.accept_request(pending)
-                elif (not self.has_friend(member.id)
-                      and not self.is_outgoing_pending(member.id)):
-                    await self.send_friend_request(member)
-
-        if (getattr(self, 'party', None) is not None
-                and self.config['fortnite']['send_friend_request']):
-            self.loop.create_task(add_members())
-
-        await asyncio.sleep(0.1)  
-
-        items = [
-            'AthenaCharacter',
-            'AthenaBackpack',
-            'AthenaPickaxe',
-            'AthenaDance'
-        ]
-        for item in items:
-            conf = self.bot.convert_backend_type(item)
-
-            if (not self.config['fortnite'][f'join_{conf}'] and item == 'AthenaDance'
-                    and self.config['fortnite']['repeat_emote_when_join']):
-                await self.party.me.change_asset(
-                    item,
-                    self.emote,
-                    section=self.emote_section
-                )
-                continue
-
-            if self.config['fortnite'][f'join_{conf}'] is None:
-                continue
-
-            variants = []
-            if item != 'AthenaDance' and self.config['fortnite'][f'join_{conf}_style'] is not None:
-                for style in self.config['fortnite'][f'join_{conf}_style']:
-                    variant = self.get_config_variant(style)
-                    if variant is not None:
-                        variants.extend(variant['variants'])
-
-            section = 0
-            if item == 'AthenaDance':
-                section = self.config['fortnite'][f'join_{conf}_section']
-
-            flag = False
-            if (member.id == self.user.id
-                    and self.config['fortnite'][f'join_{conf}_on'] == 'me'):
-                flag = True
-            elif self.config['fortnite'][f'join_{conf}_on'] == 'user':
-                flag = True
-
-            if flag:
-                await self.party.me.change_asset(
-                    item,
-                    (self.get_config_item_path(self.config['fortnite'][f'join_{conf}'])
-                     or self.config['fortnite'][f'join_{conf}']),
-                    variants=variants,
-                    section=section,
-                    do_point=False
-                )
-
-    async def event_party_member_leave(self, member: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(member) and member.id != self.user.id:
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_leave',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None:
-            self.send(
-                self.l(
-                    'party_member_leave',
-                    self.name(member),
-                    member.party.member_count
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_member_leave', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        items = [
-            'AthenaCharacter',
-            'AthenaBackpack',
-            'AthenaPickaxe',
-            'AthenaDance'
-        ]
-        for item in items:
-            conf = self.bot.convert_backend_type(item)
-            if not self.config['fortnite'][f'leave_{conf}']:
-                continue
-            if self.config['fortnite'][f'leave_{conf}_on'] == 'user':
-                await self.party.me.change_asset(
-                    item,
-                    (self.get_config_item_path(self.config['fortnite'][f'leave_{conf}'])
-                     or self.config['fortnite'][f'leave_{conf}']),
-                    do_point=False
-                )
-
-    async def event_before_leave_party(self) -> None:
-        if not self.is_ready():
-            return
-
-        if getattr(self, 'party', None) is None:
-            return
-
-        for member in self.party.members:
-            if not self.is_bot(member.id):
-                break
-        else:
-            return
-
-        items = [
-            'AthenaCharacter',
-            'AthenaBackpack',
-            'AthenaPickaxe',
-            'AthenaDance'
-        ]
-        flag = False
-        for item in items:
-            conf = self.bot.convert_backend_type(item)
-            if not self.config['fortnite'][f'leave_{conf}']:
-                continue
-
-            variants = []
-            if item != 'AthenaDance' and self.config['fortnite'][f'leave_{conf}_style'] is not None:
-                for style in self.config['fortnite'][f'leave_{conf}_style']:
-                    variant = self.get_config_variant(style)
-                    if variant is not None:
-                        variants.extend(variant['variants'])
-
-            section = 0
-            if item == 'AthenaDance':
-                section = self.config['fortnite'][f'leave_{conf}_section']
-
-            if self.config['fortnite'][f'leave_{conf}_on'] == 'me':
-                await self.party.me.change_asset(
-                    item,
-                    (self.get_config_item_path(self.config['fortnite'][f'leave_{conf}'])
-                     or self.config['fortnite'][f'leave_{conf}']),
-                    variants=variants,
-                    section=section,
-                    do_point=False
-                )
-                flag = True
-        if flag:
-            await asyncio.sleep(self.config['fortnite']['leave_delay_for'])
-
-    async def event_party_member_confirm(self, confirmation: rebootpy.PartyJoinConfirmation) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(confirmation):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_confirm',
-                        self.party_id,
-                        confirmation.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        if self.config['loglevel'] != 'normal':
-            self.send(
-                self.l(
-                    'party_member_confirm',
-                    self.name(confirmation.user)
-                ),
-                color=blue,
-                add_p=self.time_party,
-                add_d=self.discord_party
-            )
-
-        ret = await self.exec_event('party_member_confirm', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if self.is_accept_join_for(self.get_user_type(confirmation.user.id)):
-            if self.party_hides.get(self.party.id) is None:
-                self.party_hides[self.party.id] = []
-            if self.party.me.leader and self.is_hide_for(self.get_user_type(confirmation.user.id)):
-                self.party_hides[self.party.id].append(confirmation.user.id)
-            self.party.update_hide_users(self.party_hides[self.party.id])
-
-            try:
-                await confirmation.confirm()
-            except rebootpy.HTTPException as e:
-                self.print_exception(e)
-                self.send(
-                    self.l(
-                        'error_while_confirming_join_request'
-                    ),
-                    file=sys.stderr
-                )
-        else:
-            try:
-                await confirmation.reject()
-            except rebootpy.HTTPException as e:
-                self.print_exception(e)
-                self.send(
-                    self.l(
-                        'error_while_rejecting_join_request'
-                    ),
-                    file=sys.stderr
-                )
-
-    async def event_party_member_kick(self, member: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(member) and member.id != self.user.id:
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_kick',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None:
-            self.send(
-                self.l(
-                    'party_member_kick',
-                    self.name(self.party.leader),
-                    self.name(member),
-                    member.party.member_count
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_member_kick', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def event_party_member_promote(self, old_leader: rebootpy.PartyMember, new_leader: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(new_leader):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_promote',
-                        self.party_id,
-                        new_leader.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None:
-            self.send(
-                self.l(
-                    'party_member_promote',
-                    self.name(old_leader),
-                    self.name(new_leader)
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_member_promote', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if new_leader.id == self.user.id:
-            if await self.ensure_party_leader(force_refresh=True):
-                await self.init_party()
-
-    async def event_party_update(self, party: rebootpy.ClientParty) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(party):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'event_party_update',
-                        self.party_id,
-                        party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None and self.config['loglevel'] != 'normal':
-            self.send(
-                self.l(
-                    'party_update'
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_update', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def event_party_playlist_change(self, party: rebootpy.ClientParty, before: tuple, after: tuple) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(party):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_playlist_change',
-                        self.party_id,
-                        party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None and self.config['loglevel'] != 'normal':
-            self.send(
-                f'PlaylistID: {after[0]}',
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-    async def event_party_member_update(self, member: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-        if member.id == self.user.id:
-            return
-
-        if not self.is_valid_party(member):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_playlist_change',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None and self.config['loglevel'] != 'normal':
-            self.send(
-                self.l(
-                    'party_member_update',
-                    self.name(member)
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_member_update', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-    async def party_member_asset_change(self, member: rebootpy.PartyMember, item: str, before: str = None, after: str = None) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-        if member.id == self.user.id:
-            return
-
-        if not self.is_valid_party(member):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'member_asset_change',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self. discord_party, self.debug_message]
-                )
-            return
-
-        await self.ng_check(member)
-
-        asset = self.asset(item, member)
-        name = self.is_most()
-        if (name is not None and self.config['loglevel'] != 'normal'
-                and asset):
-            cosmetic_id = (after or asset).split('/')[-1].split('.')[0].strip("'\"")
-            cosmetic = None
-            for collection in (self.searcher.main_items, self.searcher.sub_items):
-                cosmetic = next((value for value in collection.values()
-                                 if str(value.get('id', '')).casefold() == cosmetic_id.casefold()), None)
-                if cosmetic is not None:
-                    break
-            cosmetic_name = self.name_cosmetic(cosmetic) if cosmetic is not None else cosmetic_id
-            cosmetic_type = (cosmetic.get('type', {}).get('displayValue')
-                             if cosmetic is not None else str(self.bot.l(self.bot.convert_backend_to_key(item))))
-            self.send(
-                f"'{self.name(member)}': {cosmetic_name} ({cosmetic_type})",
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        attr = f'is_{self.bot.convert_backend_to_key(item)}_mimic_for'
-        attr2 = f'{self.bot.convert_backend_to_key(item)}_mimic'
-        if getattr(self, attr)(self.get_user_type(member.id)) or member.id in getattr(self, attr2):
-            if self.bot.convert_backend_to_key(item) == 'emote' and not asset:
-                return
-
-            attr = f'is_{self.bot.convert_backend_to_key(item)}_lock_for'
-            if not getattr(self, attr)(self.get_user_type(member.id)):
-                await self.party.me.change_asset(
-                    item,
-                    asset=asset or '',
-                    variants=self.variants(item, member),
-                    enlightenment=member.enlightenments,
-                    section=self.section(member),
-                    do_point=False
-                )
-
-    async def event_party_member_outfit_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaCharacter', before, after)
-
-    async def event_party_member_backpack_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaBackpack', before, after)
-
-    async def event_party_member_pet_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaPetCarrier', before, after)
-
-    async def event_party_member_pickaxe_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaPickaxe', before, after)
-
-    async def event_party_member_emote_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaDance', before, after)
-
-    async def event_party_member_emoji_change(self, member: rebootpy.PartyMember, before: str, after: str) -> None:
-        await self.party_member_asset_change(member, 'AthenaEmoji', before, after)
-
-    async def event_party_member_zombie(self, member: rebootpy.PartyMember) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(member):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_zombie',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None:
-            self.send(
-                self.l(
-                    'party_member_zombie',
-                    self.name(member)
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        ret = await self.exec_event('party_member_disconnect', {**locals(), **self.variables})
-        if ret is False:
-            return
-
-        if self.party.me.leader and self.config['fortnite']['kick_disconnect']:
-            await member.kick()
-
-    async def event_party_member_in_match_change(self, member: rebootpy.PartyMember, before: bool, after: bool) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if not self.is_valid_party(member):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'party_member_in_match_change',
-                        self.party_id,
-                        member.party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        name = self.is_most()
-        if name is not None and self.config['loglevel'] != 'normal':
-            self.send(
-                self.l(
-                    'party_member_in_match_change',
-                    self.name(member)
-                ),
-                user_name=name,
-                color=blue,
-                add_p=partial(self.time_party, name=name),
-                add_d=partial(self.discord_party, name=name)
-            )
-
-        if (self.party.me.leader and self.config['fortnite']['kick_in_match']
-                and after):
-            await member.kick()
-
-
-    async def event_party_message(self, message: rebootpy.PartyMessage) -> None:
-        self.send(
-            self.l('party_message_receive', self.name(message.author), message.content),
-            add_p=self.time_party,
-            add_d=self.discord_party
-        )
-
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        message_party = getattr(message, 'party', None) or getattr(message.author, 'party', None)
-        if message_party is not None and not self.is_valid_party(message_party):
-            if self.config['loglevel'] == 'debug':
-                self.send(
-                    self.l(
-                        'ignoring_event_party_id_mismatch',
-                        'event_party_message',
-                        self.party_id,
-                        message_party.id
-                    ),
-                    color=yellow,
-                    add_p=self.time_party,
-                    add_d=[self.discord_party, self.debug_message]
-                )
-            return
-
-        if (self.config['fortnite']['chat_max'] is not None
-                and self.is_chat_max_for(self.get_user_type(message.author.id))
-                and len(message.content) > self.config['fortnite']['chat_max']):
-            functions = await self.get_chat_max_operation(user_id=message.author.id)
-            for func in functions:
-                try:
-                    if asyncio.iscoroutinefunction(func):
-                        await func()
-                    else:
-                        func()
-                except Exception as e:
-                    self.print_exception(e)
-            return
-
-        if not await self.ng_word_check(message):
-            return
-
-        if not self.is_party_chat_enable_for(self.get_user_type(message.author.id)):
-            return
-
-        mes = MyMessage(self, message)
-        await self.process_command(mes, self.config['fortnite']['prefix'])
-
-    async def event_friend_message(self, message: rebootpy.FriendMessage) -> None:
-        if not self.is_ready():
-            await self.wait_until_ready()
-
-        if (self.config['fortnite']['chat_max'] is not None
-                and self.is_chat_max_for(self.get_user_type(message.author.id))
-                and len(message.content) > self.config['fortnite']['chat_max']):
-            functions = await self.get_chat_max_operation(user_id=message.author.id)
-            for func in functions:
-                try:
-                    if asyncio.iscoroutinefunction(func):
-                        await func()
-                    else:
-                        func()
-                except Exception as e:
-                    self.print_exception(e)
-            return
-
-        if not await self.ng_word_check(message):
-            return
-
-        if not self.is_whisper_enable_for(self.get_user_type(message.author.id)):
-            return
-
-        self.send(
-            message.content,
-            user_name=self.name(message.author),
-            color=magenta,
-            add_p=[lambda x: f'{self.name(message.author)} | {x}', self.time]
-        )
-
-        mes = MyMessage(self, message)
-        await self.process_command(mes, self.config['fortnite']['prefix'])
-
-
-    async def show_help(self, command: Command, message: MyMessage) -> None:
+    if user.id in getattr(client, f'_{attr}'):
         await message.reply(
-            self.l(
-                'usage',
-                self.eval_format(
-                    command.usage,
-                    {
-                        **self.variables,
-                        **{'name': self.commands['commands'][command.name][0]}
-                    }
+            client.l(
+                'already_in_list',
+                client.l(attr),
+                client.name(user)
+            )
+        )
+        return
+    getattr(client, f'_{attr}')[user.id] = user
+    client.config['fortnite'][attr].append(client.get_user_str(user))
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'add_to_list',
+            client.l(attr),
+            client.name(user)
+        )
+    )
+
+
+async def remove_from_list(attr: str, message: MyMessage, user: fortnitepy.User):
+    client = message.client
+
+    if user.id not in getattr(client, f'_{attr}'):
+        await message.reply(
+            client.l(
+                'not_in_list',
+                client.l(attr),
+                client.name(user)
+            )
+        )
+        return
+    getattr(client, f'_{attr}').pop(user.id)
+    client.config['fortnite'][attr].remove(client.get_user_str(user))
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'remove_from_list',
+            client.l(attr),
+            client.name(user)
+        )
+    )
+
+
+async def list_operation(func: Callable, attr: str, command: Command,
+                         message: MyMessage) -> None:
+    client = message.client
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+    users = client.find_users(
+        ' '.join(message.args[1:]),
+        mode=FindUserMode.NAME_ID,
+        method=FindUserMatchMethod.CONTAINS,
+        me=message.author
+    )
+    user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
+    if user is not None and user not in users:
+        users.append(user)
+
+    if client.config['search_max'] and len(users) > client.config['search_max']:
+        await message.reply(
+            client.l('too_many', client.l('user'), len(users))
+        )
+        return
+
+    if len(users) == 0:
+        await message.reply(
+            client.l(
+                'not_found',
+                client.l('user'),
+                ' '.join(message.args[1:])
+            )
+        )
+    elif len(users) == 1:
+        await func(attr, message, users[0])
+    else:
+        client.select[message.author.id] = {
+            'exec': f'await func(attr, message, user)',
+            'globals': {**globals(), **locals()},
+            'variables': [
+                {'user': user, 'func': func}
+                for user in users
+            ]
+        }
+        await message.reply(
+            ('\n'.join([f'{num}: {client.name(user)}'
+                        for num, user in enumerate(users, 1)])
+                + '\n' + client.l('enter_number_to_select', client.l(attr)))
+        )
+
+
+async def discord_add_to_list(attr: str, message: MyMessage, user: discord.User):
+    client = message.client
+
+    if user.id in getattr(message.discord_client, f'_{attr}'):
+        await message.reply(
+            client.l(
+                'already_in_list',
+                client.l(attr),
+                client.name(user)
+            )
+        )
+        return
+    getattr(message.discord_client, f'_{attr}')[user.id] = user
+    client.config['discord'][attr].append(user.id)
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'add_to_list',
+            client.l(attr),
+            message.discord_client.name(user)
+        )
+    )
+
+
+async def discord_remove_from_list(attr: str, message: MyMessage, user: discord.User):
+    client = message.client
+
+    if user.id not in getattr(message.discord_client, f'_{attr}'):
+        await message.reply(
+            client.l(
+                'not_in_list',
+                client.l(attr),
+                client.name(user)
+            )
+        )
+        return
+    getattr(message.discord_client, f'_{attr}').pop(user.id, None)
+    client.config['discord'][attr].remove(user.id) if user.id in client.config['discord'][attr] else None
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'remove_from_list',
+            client.l(attr),
+            client.discord_bot.name(user)
+        )
+    )
+
+
+async def discord_list_operation(func: Callable, attr: str, command: Command,
+                                 message: MyMessage) -> None:
+    client = message.client
+    if len(message.args) < 2 or not message.args[1].isdigit():
+        await client.show_help(command, message)
+        return
+
+    user = message.discord_client.get_user(int(message.args[1]))
+    if user is None:
+        try:
+            user = await message.discord_client.fetch_user(int(message.args[1]))
+        except discord.NotFound:
+            pass
+
+    if user is None:
+        await message.reply(
+            client.l(
+                'not_found',
+                client.l('user'),
+                message.args[1]
+            )
+        )
+    else:
+        await func(attr, message, user)
+
+
+async def all_cosmetics(item: str, client: 'Client', message: MyMessage) -> None:
+    attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+    if getattr(client, attr)(message.user_type):
+        await message.reply(
+            client.l('cosmetic_locked')
+        )
+        return
+
+    async def all_cosmetics():
+        cosmetics = [
+            i for i in client.bot.main_items.values()
+            if i['type']['backendValue'] == item
+        ]
+        for cosmetic in cosmetics:
+            if getattr(client, attr)(message.user_type):
+                await message.reply(
+                    client.l('cosmetic_locked')
+                )
+                return
+
+            await client.party.me.change_asset(
+                cosmetic['type']['backendValue'],
+                cosmetic['path'],
+                keep=False
+            )
+            await message.reply(
+                f'{cosmetic["type"]["displayValue"]}: {client.name_cosmetic(cosmetic)}'
+            )
+            await asyncio.sleep(5)
+        await message.reply(
+            client.l(
+                'has_end',
+                client.bot.l(client.bot.convert_backend_to_key(item))
+            )
+        )
+
+    task = client.loop.create_task(all_cosmetics())
+    client.stoppable_tasks.append(task)
+
+
+async def cosmetic_search(item: Optional[str], mode: str, command: Command,
+                          client: 'Client', message: MyMessage) -> None:
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+    async def set_cosmetic(cosmetic):
+        item = cosmetic['type']['backendValue']
+        attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+        if getattr(client, attr)(message.user_type):
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+            return
+        await client.party.me.change_asset(item, cosmetic['path'])
+        await message.reply(
+            client.l(
+                'set_to',
+                cosmetic['type']['displayValue'],
+                client.name_cosmetic(cosmetic)
+            )
+        )
+
+    cosmetics = client.searcher.search_item(mode, ' '.join(message.args[1:]), item)
+
+    if client.config['search_max'] and len(cosmetics) > client.config['search_max']:
+        await message.reply(
+            client.l('too_many', client.l('item'), len(cosmetics))
+        )
+        return
+
+    if len(cosmetics) == 0:
+        await message.reply(
+            client.l(
+                'not_found',
+                client.l('item'),
+                ' '.join(message.args[1:])
+            )
+        )
+        return
+
+    if len(cosmetics) == 1:
+        await set_cosmetic(cosmetics[0])
+    else:
+        client.select[message.author.id] = {
+            'exec': 'await set_cosmetic(cosmetic)',
+            'globals': {**globals(), **locals()},
+            'variables': [
+                {'cosmetic': cosmetic}
+                for cosmetic in cosmetics
+            ]
+        }
+        if item is None:
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name_cosmetic(cosmetic)} ({cosmetic["type"]["displayValue"]})'
+                            for num, cosmetic in enumerate(cosmetics, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('item')))
+            )
+        else:
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name_cosmetic(cosmetic)}'
+                            for num, cosmetic in enumerate(cosmetics, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('item')))
+            )
+
+
+async def random_cosmetic(item: Optional[str], command: Command, client: 'Client',
+                          message: MyMessage) -> None:
+    attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+    if not getattr(client, attr)(message.user_type):
+        cosmetic = client.bot.searcher.random_item(item)
+        await client.party.me.change_asset(cosmetic['type']['backendValue'], cosmetic['path'])
+        await message.reply(
+            client.l(
+                'set_to',
+                cosmetic['type']['displayValue'],
+                client.name_cosmetic(cosmetic)
+            )
+        )
+    else:
+        await message.reply(
+            client.l('cosmetic_locked')
+        )
+
+
+async def playlist_search(mode: str, command: Command,
+                          client: 'Client', message: MyMessage) -> None:
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+    async def set_playlist(message, playlist):
+        if not client.party.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+        try:
+            await client.party.set_playlist(playlist['id'])
+        except fortnitepy.Forbidden:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+        await message.reply(
+            client.l(
+                'set_to',
+                client.bot.l('playlist'),
+                client.name_cosmetic(playlist)
+            )
+        )
+
+    playlists = client.searcher.search_playlist(
+        mode,
+        ' '.join(message.args[1:])
+    )
+
+    if client.config['search_max'] and len(playlists) > client.config['search_max']:
+        await message.reply(
+            client.l('too_many', client.l('playlist'), len(playlists))
+        )
+        return
+
+    if len(playlists) == 0:
+        await message.reply(
+            client.l(
+                'not_found',
+                client.l('playlist'),
+                ' '.join(message.args[1:])
+            )
+        )
+    elif len(playlists) == 1:
+        await set_playlist(message, playlists[0])
+    else:
+        client.select[message.author.id] = {
+            'exec': 'await set_playlist(message, playlist)',
+            'globals': {**globals(), **locals()},
+            'variables': [
+                {'playlist': playlist}
+                for playlist in playlists
+            ]
+        }
+        await message.reply(
+            ('\n'.join([f'{num}: {client.name_cosmetic(playlist)}'
+                        for num, playlist in enumerate(playlists, 1)])
+                + '\n' + client.l('enter_number_to_select', client.bot.l('playlist')))
+        )
+
+
+async def set_config_for(keys: List[str], command: Command,
+                         message: MyMessage) -> None:
+    client = message.client
+
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+
+    user_types = [(i, client.commands[i['value']]) for i in client.bot.multiple_select_user_type]
+
+    final = []
+    for arg in message.args[1:]:
+        for value, values in user_types:
+            if arg in values:
+                final.append(value)
+                break
+        else:
+            await message.reply(client.l(
+                'must_be_one_of',
+                client.l('user_type'),
+                ', '.join([i[0] for _, i in user_types])
+            ))
+            return
+
+    if client.bot.none_data in final:
+        final = client.bot.none_data
+
+    client.bot.set_dict_key(
+        client.config,
+        keys,
+        [i['real_value'] for i in final]
+    )
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'set_to',
+            client.bot.web.l(f'editor_{"_".join(keys)}'),
+            ', '.join([i['display_value'].get_text() for i in final])
+        )
+    )
+
+
+async def set_config_operation(keys: List[str], command: Command,
+                         message: MyMessage) -> None:
+    client = message.client
+
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+
+    operations = [(i, client.commands.get(f'operation_{i["value"]}') or client.commands[i['value']])
+                  for i in client.bot.multiple_select_user_operation]
+
+    final = []
+    for arg in message.args[1:]:
+        for value, values in operations:
+            if arg in values:
+                final.append(value)
+                break
+        else:
+            await message.reply(client.l(
+                'must_be_one_of',
+                client.l('operation'),
+                ', '.join([i[0] for _, i in operations])
+            ))
+            return
+
+    if client.bot.none_data in final:
+        final = client.bot.none_data
+
+    client.bot.set_dict_key(
+        client.config,
+        keys,
+        [i['real_value'] for i in final]
+    )
+    client.bot.save_json('config', client.bot.config)
+    await message.reply(
+        client.l(
+            'set_to',
+            client.bot.web.l(f'editor_{"_".join(keys)}'),
+            ', '.join([i['display_value'].get_text() for i in final])
+        )
+    )
+
+
+async def set_mimic(attr: str, keys: List[str], command: Command,
+                    message: MyMessage) -> None:
+    client = message.client
+
+    if len(message.args) < 2:
+        await client.show_help(command, message)
+        return
+
+    if message.args[1] in [*client.commands['add'], *client.commands['remove']]:
+        users = client.find_users(
+            ' '.join(message.args[2:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            me=message.author
+        )
+
+        async def operation(user):
+            mimic = getattr(client, attr)
+            if message.args[1] in client.commands['add']:
+                if user.id in mimic:
+                    await message.reply(
+                        client.l(
+                            'already_in_list',
+                            client.l(attr),
+                            client.name(user)
+                        )
+                    )
+                    return
+                mimic.append(user.id)
+                key = 'add_to_list'
+            else:
+                if user.id not in mimic:
+                    await message.reply(
+                        client.l(
+                            'not_in_list',
+                            client.l(attr),
+                            client.name(user)
+                        )
+                    )
+                    return
+                mimic.remove(user.id)
+                key = 'remove_from_list'
+
+            await message.reply(
+                client.l(
+                    key,
+                    client.l(attr),
+                    client.name(user)
+                )
+            )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[2:])
+                )
+            )
+        elif len(users) == 1:
+            await operation(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await operation(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+    else:
+        await set_config_for(keys, command, message)
+
+
+class DefaultCommands:
+    @command(
+        name='exec',
+        usage='{name} [code]'
+    )
+    async def exec(command: Command, client: 'Client', message: MyMessage) -> None:
+        var = globals()
+        var.update(locals())
+        var.update(client.variables)
+        result, out, err = await client.bot.aexec(' '.join(message.content.split(' ')[1:]), var)
+        if out:
+            client.send(out)
+        if err:
+            client.send(
+                err,
+                file=sys.stderr
+            )
+        client.send(
+            str(result),
+            add_p=client.time
+        )
+        await message.reply(str(result))
+
+    @command(
+        name='clear',
+        usage='{name}'
+    )
+    async def clear(command: Command, client: 'Client', message: MyMessage) -> None:
+        if sys.platform == 'win32':
+            os.system('cls')
+        else:
+            os.system('clear')
+        await message.reply(
+            client.l('console_clear')
+        )
+
+    @command(
+        name='help',
+        usage='{name} [{client.l("command")}]'
+    )
+    async def help(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        cmd = client.all_commands.get(message.args[1])
+        if cmd is None:
+            for identifier, words in client.commands['commands'].items():
+                if message.args[1] in words:
+                    cmd = client.all_commands[identifier]
+                    break
+            else:
+                await message.reply(
+                    client.l('please_enter_valid_number')
+                )
+                return
+
+        await client.show_help(cmd, message)
+
+    @command(
+        name='check_update',
+        usage='{name}'
+    )
+    async def check_update(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(client.l('checking_update'))
+        if await client.bot.updater.check_updates(client.bot.dev):
+            await message.reply(client.l('updated'))
+        else:
+            await message.reply(client.l('no_update'))
+
+    @command(
+        name='stat',
+        usage='{name} [{client.l("stat_usage", **client.variables_without_self)}] [{client.l("command")}/{client.l("ng_word")}]'
+    )
+    async def stat(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        def get_stats(key):
+            stats = {}
+            for user_id, user_stat in client.bot.command_stats[client.user.id][key].items():
+                for word, number in user_stat.items():
+                    if word not in stats:
+                        stats[word] = {
+                            'count': 0,
+                            'most_user': {
+                                'id': None,
+                                'count': 0
+                            }
+                        }
+                    
+                    stats[word]['count'] += number
+                    if number > stats[word]['most_user']['count']:
+                        stats[word]['most_user'] = {
+                            'id': user_id,
+                            'count': number
+                        }
+            return stats
+
+        async def get_user(data):
+            user = None
+            name = None
+            if client.is_id(data['id']):
+                user = await client.fetch_user(data['id'], cache=True)
+                name = client.name(user)
+            elif client.discord_client is not None and client.discord_client.is_ready():
+                user = await client.discord_client.fetch_user(int(data['id']))
+                name = client.discord_client.name(user)
+            elif client.bot.discord_client is not None and client.bot.discord_client.is_ready():
+                user = await client.bot.discord_client.fetch_user(int(data['id']))
+                name = client.bot.discord_client.name(user)
+            return user, name
+
+        if message.args[1] in client.commands['command']:
+            if len(message.args) < 3:
+                await client.show_help(command, message)
+                return
+
+            cmd = client.all_commands.get(message.args[2])
+            if cmd is None:
+                for identifier, words in client.commands['commands'].items():
+                    if message.args[2] in words:
+                        cmd = client.all_commands[identifier]
+                        break
+                else:
+                    await message.reply(
+                        client.l('please_enter_valid_number')
+                    )
+                    return
+
+            stat = client.bot.command_stats.get(client.user.id)
+            if stat is None:
+                await message.reply(
+                    client.l('no_stat')
+                )
+                return
+
+            stats = get_stats('commands')
+
+            command_stat = stats.get(cmd.name)
+            if command_stat is None:
+                await message.reply(
+                    client.l(
+                        'no_stat_command',
+                        cmd.name
+                    )
+                )
+                return
+
+            most_user = command_stat['most_user']
+            user = None
+            name = None
+            if most_user is not None:
+                user, name = await get_user(most_user)
+            if user is None:
+                await message.reply(
+                    client.l(
+                        'stat_command',
+                        cmd.name,
+                        command_stat['count']
+                    )
+                )
+            else:
+                await message.reply(
+                    client.l(
+                        'stat_command_user',
+                        cmd.name,
+                        command_stat['count'],
+                        name,
+                        most_user['count']
+                    )
+                )
+        elif message.args[1] in client.commands['ng_word']:
+            if len(message.args) < 3:
+                await client.show_help(command, message)
+                return
+
+            text = ' '.join(message.args[2:])
+            for ng in client.config['ng_words']:
+                if text in ng['words']:
+                    break
+            else:
+                await message.reply(
+                    client.l('please_enter_valid_number')
+                )
+                return
+
+            stat = client.bot.command_stats.get(client.user.id)
+            if stat is None:
+                await message.reply(
+                    client.l('no_stat')
+                )
+                return
+
+            stats = get_stats('ngs')
+
+            ng_word_stat = stats.get(text)
+            if ng_word_stat is None:
+                await message.reply(
+                    client.l(
+                        'no_stat_ng_word',
+                        text
+                    )
+                )
+                return
+
+            most_user = ng_word_stat['most_user']
+            user = None
+            name = None
+            if most_user is not None:
+                user, name = await get_user(most_user)
+            if user is None:
+                await message.reply(
+                    client.l(
+                        'stat_ng_word',
+                        text,
+                        ng_word_stat['count']
+                    )
+                )
+            else:
+                await message.reply(
+                    client.l(
+                        'stat_ng_word_user',
+                        text,
+                        ng_word_stat['count'],
+                        name,
+                        most_user['count']
+                    )
+                )
+        elif message.args[1] in client.commands['most']:
+            stats = get_stats('commands')
+            identifier, data = max(stats.items(), key=lambda x: x[1]['count'])
+
+            stats_ng_word = get_stats('ngs')
+            text, data_ng_word = max(stats_ng_word.items(), key=lambda x: x[1]['count'])
+
+            await message.reply(
+                client.l(
+                    'stat_most',
+                    identifier,
+                    data['count'],
+                    text,
+                    data_ng_word['count']
+                )
+            )
+
+    @command(
+        name='ping',
+        usage='{name}'
+    )
+    async def ping(command: Command, client: 'Client', message: MyMessage) -> None:
+        latency = abs((datetime.datetime.utcnow() - message.created_at).total_seconds())
+        await message.reply(
+            client.l('ping', int(latency * 1000))
+        )
+
+    @command(
+        name='prev',
+        usage='{name}'
+    )
+    async def prev(command: Command, client: 'Client', message: MyMessage) -> None:
+        if message.prev is not None:
+            await client.process_command(message.prev, None)
+
+    @command(
+        name='send_all',
+        usage='{name} [{client.l("message")}]'
+    )
+    async def send_all(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        tasks = []
+        for c in client.bot.clients:
+            mes = DummyMessage(c, message, content=' '.join(message.args[1:]))
+            c.send(
+                mes.content,
+                user_name=c.name(mes.author),
+                add_p=[lambda x: f'{c.name(mes.author)} | {x}', c.time]
+            )
+            task = client.loop.create_task(c.process_command(MyMessage(c, mes), None))
+            tasks.append((c, mes, task))
+        await asyncio.gather(*(task for _, _, task in tasks))
+
+        texts = []
+        for c, mes, task in tasks:
+            if mes.result:
+                texts.append(f'[{client.name(c.user)}] {mes.result}')
+        await message.reply('\n\n'.join(texts))
+
+    @command(
+        name='restart',
+        usage='{name}'
+    )
+    async def restart(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l('restarting')
+        )
+        await asyncio.sleep(1)
+        await client.bot.reboot()
+
+    @command(
+        name='relogin',
+        usage='{name}'
+    )
+    async def relogin(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l('relogining')
+        )
+        await asyncio.sleep(1)
+        await client.restart()
+        await message.reply('done')
+
+    @command(
+        name='reload',
+        usage='{name}'
+    )
+    async def reload(command: Command, client: 'Client', message: MyMessage) -> None:
+        config, error_config = client.bot.load_config()
+        if config is None and error_config is None:
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+        if error_config:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_config),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        try:
+            client_config = config['clients'][client.num]
+        except IndexError:
+            await message.reply(
+                client.l('failed_to_load_config_index')
+            )
+            return
+
+        client.bot.config['clients'][client.num].clear()
+        client.bot.config['clients'][client.num].update(client_config)
+        client.bot.fix_config(client.config)
+        ret = await client.ready_init()
+        if not ret:
+            await message.reply(
+                client.l('failed_to_load_config_init')
+            )
+            return
+        await message.reply(
+            client.l('load_config_success')
+        )
+
+        if client.config['fortnite']['refresh_on_reload']:
+            coros = []
+
+            items = [
+                'AthenaCharacter',
+                'AthenaBackpack',
+                'AthenaPickaxe',
+                'AthenaDance'
+            ]
+            for item in items:
+                conf = client.bot.convert_backend_type(item)
+                variants = []
+                if item != 'AthenaDance' and client.config['fortnite'][f'{conf}_style'] is not None:
+                    for style in client.config['fortnite'][f'{conf}_style']:
+                        variant = client.get_config_variant(style)
+                        if variant is not None:
+                            variants.extend(variant['variants'])
+                coro = client.party.me.change_asset(
+                    item,
+                    (client.get_config_item_path(client.config['fortnite'][conf])
+                     or client.config['fortnite'][conf]),
+                    variants=variants
+                )
+                coro.__qualname__ = f'ClientPartyMember.set_{conf}'
+                coros.append(coro)
+            await client.party.me.edit(
+                *coros
+            )
+
+        commands, error_commands = client.bot.load_commands()
+        if commands is None and error_commands is None:
+            await message.reply(
+                client.l('failed_to_load_commands')
+            )
+            return
+        if error_commands:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_commands),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        client.commands = commands
+        client.error_commands = error_commands
+
+        custom_commands, error_custom_commands = client.bot.load_custom_commands()
+        if custom_commands is None and error_custom_commands is None:
+            await message.reply(
+                client.l('failed_to_load_custom_commands')
+            )
+            return
+        if error_custom_commands:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_custom_commands),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        client.custom_commands = custom_commands
+        client.error_custom_commands = error_custom_commands
+
+        await message.reply(
+            client.l('load_commands_success')
+        )
+
+    @command(
+        name='reload_all',
+        usage='{name}'
+    )
+    async def reload_all(command: Command, client: 'Client', message: MyMessage) -> None:
+        config, error_config = client.bot.load_config()
+        if config is None and error_config is None:
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+        if error_config:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_config),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        client.bot.config.clear()
+        client.bot.config.update(config)
+        client.bot.error_config = error_config
+        client.bot.fix_config_all()
+        for c in client.bot.clients:
+            try:
+                ret = await c.ready_init()
+                if not ret:
+                    await message.reply(
+                        c.l('failed_to_load_config_init')
+                    )
+                    return
+
+                if c.config['fortnite']['refresh_on_reload']:
+                    coros = []
+
+                    items = [
+                        'AthenaCharacter',
+                        'AthenaBackpack',
+                        'AthenaPickaxe',
+                        'AthenaDance'
+                    ]
+                    for item in items:
+                        conf = c.bot.convert_backend_type(item)
+                        variants = []
+                        if item != 'AthenaDance' and c.config['fortnite'][f'{conf}_style'] is not None:
+                            for style in c.config['fortnite'][f'{conf}_style']:
+                                variant = c.get_config_variant(style)
+                                if variant is not None:
+                                    variants.extend(variant['variants'])
+                        coro = c.party.me.change_asset(
+                            item,
+                            (c.get_config_item_path(c.config['fortnite'][conf])
+                             or c.config['fortnite'][conf]),
+                            variants=variants
+                        )
+                        coro.__qualname__ = f'ClientPartyMember.set_{conf}'
+                        coros.append(coro)
+                    await c.party.me.edit(
+                        *coros
+                    )
+            except IndexError as e:
+                client.debug_print_exception(e)
+
+        client.bot.save_json('config', config)
+
+        await message.reply(
+            client.l('load_config_success')
+        )
+
+        commands, error_commands = client.bot.load_commands()
+        if commands is None and error_commands is None:
+            await message.reply(
+                client.l('failed_to_load_commands')
+            )
+            return
+        if error_commands:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_commands),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        client.bot.commands = commands
+        client.bot.error_commands = error_commands
+        for client in client.bot.clients:
+            client.commands = commands
+
+        custom_commands, error_custom_commands = client.bot.load_custom_commands()
+        if custom_commands is None and error_custom_commands is None:
+            await message.reply(
+                client.l('failed_to_load_custom_commands')
+            )
+            return
+        if error_custom_commands:
+            client.send(
+                client.bot.l(
+                    'error_keys',
+                    '\n'.join(error_custom_commands),
+                    default=(
+                        '以下のキーに問題がありました\n{0}\n'
+                        'There was an error on keys\n{0}\n'
+                    )
+                ),
+                file=sys.stderr
+            )
+            await message.reply(
+                client.l('failed_to_load_config')
+            )
+            return
+
+        client.bot.custom_commands = custom_commands
+        client.bot.error_custom_commands = error_custom_commands
+        for client in client.bot.clients:
+            client.custom_commands = custom_commands
+
+        await message.reply(
+            client.l('load_commands_success')
+        )
+
+    @command(
+        name='add_blacklist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def add_blacklist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(add_to_list, 'blacklist', command, message)
+
+    @command(
+        name='remove_blacklist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def remove_blacklist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(remove_from_list, 'blacklist', command, message)
+
+    @command(
+        name='add_whitelist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def add_whitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(add_to_list, 'whitelist', command, message)
+
+    @command(
+        name='remove_whitelist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def remove_whitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(remove_from_list, 'whitelist', command, message)
+
+    @command(
+        name='add_botlist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def add_botlist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(add_to_list, 'botlist', command, message)
+
+    @command(
+        name='remove_botlist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def remove_botlist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(remove_from_list, 'botlist', command, message)
+
+    @command(
+        name='discord_add_blacklist',
+        usage='{name} [{client.l("name_or_id")}]',
+        discord_required=True
+    )
+    async def discord_add_blacklist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await discord_list_operation(discord_add_to_list, 'blacklist', command, message)
+
+    @command(
+        name='discord_remove_blacklist',
+        usage='{name} [{client.l("name_or_id")}]',
+        discord_required=True
+    )
+    async def discord_remove_blacklist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await discord_list_operation(discord_remove_from_list, 'blacklist', command, message)
+
+    @command(
+        name='discord_add_whitelist',
+        usage='{name} [{client.l("name_or_id")}]',
+        discord_required=True
+    )
+    async def discord_add_whitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await discord_list_operation(discord_add_to_list, 'whitelist', command, message)
+
+    @command(
+        name='discord_remove_whitelist',
+        usage='{name} [{client.l("name_or_id")}]',
+        discord_required=True
+    )
+    async def discord_remove_whitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await discord_list_operation(discord_remove_from_list, 'whitelist', command, message)
+
+    @command(
+        name='add_invitelist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def add_invitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(add_to_list, 'invitelist', command, message)
+
+    @command(
+        name='remove_invitelist',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def remove_invitelist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await list_operation(remove_from_list, 'invitelist', command, message)
+
+    @command(
+        name='ng_outfit_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_outfit_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_outfit_for'], command, message)
+
+    @command(
+        name='ng_outfit_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_outfit_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_outfit_operation'], command, message)
+
+    @command(
+        name='outfit_mimic_for',
+        usage='{name} [{client.commands[add][0]}/{client.commands[remove][0]}/{client.l("user_types", **client.variables_without_self)}] ({client.l("name_or_id")})'
+    )
+    async def outfit_mimic_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_mimic('outfit_mimic', ['fortnite', 'outfit_mimic_for'], command, message)
+
+    @command(
+        name='ng_backpack_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_backpack_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_backpack_for'], command, message)
+
+    @command(
+        name='ng_backpack_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_backpack_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_backpack_operation'], command, message)
+
+    @command(
+        name='backpack_mimic_for',
+        usage='{name} [{client.commands[add][0]}/{client.commands[remove][0]}/{client.l("user_types", **client.variables_without_self)}] ({client.l("name_or_id")})'
+    )
+    async def backpack_mimic_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_mimic('backpack_mimic', ['fortnite', 'backpack_mimic_for'], command, message)
+
+    @command(
+        name='ng_pickaxe_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_pickaxe_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_pickaxe_for'], command, message)
+
+    @command(
+        name='ng_pickaxe_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_pickaxe_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_pickaxe_operation'], command, message)
+
+    @command(
+        name='pickaxe_mimic_for',
+        usage='{name} [{client.commands[add][0]}/{client.commands[remove][0]}/{client.l("user_types", **client.variables_without_self)}] ({client.l("name_or_id")})'
+    )
+    async def pickaxe_mimic_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_mimic('pickaxe_mimic', ['fortnite', 'pickaxe_mimic_for'], command, message)
+
+    @command(
+        name='ng_emote_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_emote_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_emote_for'], command, message)
+
+    @command(
+        name='ng_emote_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_emote_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_emote_operation'], command, message)
+
+    @command(
+        name='emote_mimic_for',
+        usage='{name} [{client.commands[add][0]}/{client.commands[remove][0]}/{client.l("user_types", **client.variables_without_self)}] ({client.l("name_or_id")})'
+    )
+    async def emote_mimic_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_mimic('emote_mimic', ['fortnite', 'emote_mimic_for'], command, message)
+
+    @command(
+        name='ng_platform_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_platform_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_platform_for'], command, message)
+
+    @command(
+        name='ng_platform_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_platform_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_platform_operation'], command, message)
+
+    @command(
+        name='ng_name_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_name_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'ng_name_for'], command, message)
+
+    @command(
+        name='ng_name_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_name_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_name_operation'], command, message)
+
+    @command(
+        name='accept_invite_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def accept_invite_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'accept_invite_for'], command, message)
+
+    @command(
+        name='decline_invite_when',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def decline_invite_when(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'decline_invite_when'], command, message)
+
+    @command(
+        name='invite_interval_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def invite_interval_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'invite_interval_for'], command, message)
+
+    @command(
+        name='accept_friend_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def accept_friend_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'accept_friend_for'], command, message)
+
+    @command(
+        name='whisper_enable_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def whisper_enable_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'whisper_enable_for'], command, message)
+
+    @command(
+        name='party_chat_enable_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def party_chat_enable_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'party_chat_enable_for'], command, message)
+
+    @command(
+        name='permission_command_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def permission_command_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'permission_command_operation'], command, message)
+
+    @command(
+        name='accept_join_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def accept_join_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'accept_join_for'], command, message)
+
+    @command(
+        name='chat_max_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def chat_max_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'chat_max_for'], command, message)
+
+    @command(
+        name='chat_max_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def chat_max_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'chat_max_operation'], command, message)
+
+    @command(
+        name='hide_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def hide_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'hide_for'], command, message)
+
+    @command(
+        name='blacklist_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def blacklist_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'blacklist_operation'], command, message)
+
+    @command(
+        name='botlist_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def botlist_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'botlist_operation'], command, message)
+
+    @command(
+        name='discord_chat_max_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def discord_chat_max_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'discord_chat_max_for'], command, message)
+
+    @command(
+        name='discord_command_enable_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def discord_command_enable_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['fortnite', 'discord_command_enable_for'], command, message)
+
+    @command(
+        name='ng_word_for',
+        usage='{name} [{client.l("user_types", **client.variables_without_self)}]'
+    )
+    async def ng_word_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_for(['ng_word_for'], command, message)
+
+    @command(
+        name='ng_word_operation',
+        usage='{name} [{client.l("operations", **client.variables_without_self)}]'
+    )
+    async def ng_word_operation(command: Command, client: 'Client', message: MyMessage) -> None:
+        await set_config_operation(['fortnite', 'ng_word_operation'], command, message)
+
+    @command(
+        name='get_user',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def get_user(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            me=message.author
+        )
+        user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
+        if user is not None:
+            users.append(user)
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        else:
+            text = '\n'.join([client.name(user) for user in users])
+            client.send(text)
+            await message.reply(text)
+
+    @command(
+        name='get_friend',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def get_friend(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        else:
+            text = ''
+            for user in users:
+                friend = client.get_friend(user.id)
+                if friend is None:
+                    continue
+
+                text += (
+                    f'{client.name(friend)}: '
+                    f'{client.l("online") if friend.is_online() else client.l("offline")}\n'
+                )
+                if friend.last_presence:
+                    text += client.l(
+                        'status_info',
+                        friend.last_presence.status
+                    ) + '\n'
+                    if friend.last_presence.avatar:
+                        text += client.l(
+                            'avatar_info',
+                            friend.last_presence.avatar.asset
+                        ) + '\n'
+                if friend.last_logout:
+                    text += client.l(
+                        'last_logout_info',
+                        friend.last_logout
+                    ) + '\n'
+            client.send(text)
+            await message.reply(text)
+
+    @command(
+        name='get_pending',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def get_pending(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.pending_friends,
+            me=message.author
+        )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        else:
+            text = ''
+
+            outgoings = [user for user in users if client.is_outgoing_pending(user.id)]
+            text += client.l('outgoing_pending') + '\n'
+            text += '\n'.join([client.name(outgoing) for outgoing in outgoings])
+
+            incomings = [user for user in users if client.is_incoming_pending(user.id)]
+            text += client.l('incoming_pending') + '\n'
+            text += '\n'.join([client.name(incoming) for incoming in incomings])
+
+            client.send(text)
+            await message.reply(text)
+
+    @command(
+        name='get_block',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def get_block(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.blocked_users,
+            me=message.author
+        )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        else:
+            text = '\n'.join([client.name(user) for user in users])
+            client.send(text)
+            await message.reply(text)
+
+    @command(
+        name='get_member',
+        usage='{name} [{client.l("name_or_id)}]'
+    )
+    async def get_member(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.party.members,
+            me=message.author
+        )
+
+        async def get_member(user):
+            member = client.party.get_member(user.id)
+            if member is None:
+                await message.reply(
+                    client.l(
+                        'not_found',
+                        client.l('party_member'),
+                        client.name(user)
+                    )
+                )
+                return
+
+            text = (f'{client.name(member)}\n'
+                    f'CID: {client.asset("AthenaCharacter", member)} {member.outfit_variants}\n'
+                    f'BID: {client.asset("AthenaBackpack", member)} {member.backpack_variants}\n'
+                    f'Pickaxe_ID: {client.asset("AthenaPickaxe", member)} {member.pickaxe_variants}\n'
+                    f'EID: {client.asset("AthenaDance", member)}\n')
+            client.send(text)
+            if client.config['loglevel'] == 'debug':
+                client.send(
+                    json.dumps(member.meta.schema, indent=4, ensure_ascii=False),
+                    color=yellow,
+                    add_p=client.time,
+                    add_d=client.debug_message
+                )
+            await message.reply(text)
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await get_member(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await get_member(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='party_info',
+        usage='{name}'
+    )
+    async def party_info(command: Command, client: 'Client', message: MyMessage) -> None:
+        if client.config['loglevel'] == 'debug':
+            client.send(
+                json.dumps(client.party.meta.schema, indent=4, ensure_ascii=False),
+                color=yellow,
+                add_p=client.time,
+                add_d=client.debug_message
+            )
+        await message.reply(
+            client.l(
+                'party_info',
+                client.party_id,
+                client.party.member_count,
+                client.party.playlist_info[0],
+                '\n'.join([client.name(member) for member in client.party.members])
+            )
+        )
+
+    @command(
+        name='friend_count',
+        usage='{name}'
+    )
+    async def friend_count(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l('friend_count_info', len(client.friends))
+        )
+
+    @command(
+        name='pending_count',
+        usage='{name}'
+    )
+    async def pending_count(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l(
+                'pending_count_info',
+                len(client.pending_friends),
+                len(client.outgoing_pending_friends),
+                len(client.incoming_pending_friends)
+            )
+        )
+
+    @command(
+        name='block_count',
+        usage='{name}'
+    )
+    async def block_count(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l('block_count_info', len(client.block_users))
+        )
+
+    @command(
+        name='friend_list',
+        usage='{name}'
+    )
+    async def friend_list(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l(
+                'friend_list_info',
+                len(client.friends),
+                '\n'.join([client.name(user) for user in client.friends])
+            )
+        )
+
+    @command(
+        name='pending_list',
+        usage='{name}'
+    )
+    async def pending_list(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l(
+                'pending_list_info',
+                len(client.outgoing_pending_friends),
+                len(client.incoming_pending_friends),
+                '\n'.join([client.name(user) for user in client.outgoing_pending_friends]),
+                '\n'.join([client.name(user) for user in client.incoming_pending_friends])
+            )
+        )
+
+    @command(
+        name='block_list',
+        usage='{name}'
+    )
+    async def block_list(command: Command, client: 'Client', message: MyMessage) -> None:
+        await message.reply(
+            client.l(
+                'block_list_info',
+                len(client.blocked_users),
+                '\n'.join([client.name(user) for user in client.blocked_users])
+            )
+        )
+
+    @command(
+        name='add_friend',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def add_friend(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            me=message.author
+        )
+        user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
+        if user is not None and user not in users:
+            users.append(user)
+
+        async def add_friend(user):
+            if client.has_friend(user.id):
+                await message.reply(
+                    client.l(
+                        'already_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.send_friend_request(user, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'add_friend',
+                        client.name(user)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await add_friend(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await add_friend(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='remove_friend',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def remove_friend(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        async def remove_friend(user):
+            friend = client.get_friend(user.id)
+            if friend is None:
+                await message.reply(
+                    client.l(
+                        'not_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.remove_friend(friend, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'remove_friend',
+                        client.name(friend)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await remove_friend(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await remove_friend(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='remove_friends',
+        usage='{name} [{client.l("number")}]'
+    )
+    async def remove_friends(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            number = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        random_friends = random.sample(client.friends, k=number)
+
+        async def remove_friends():
+            friend_count_before = len(client.friends)
+            for friend in random_friends:
+                await client.remove_friend(friend, message)
+            friend_count_after = len(client.friends)
+            await message.reply(
+                client.l(
+                    'remove_friends',
+                    friend_count_before - friend_count_after
+                )
+            )
+
+        task = client.loop.create_task(remove_friends())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='remove_all_friend',
+        usage='{name}'
+    )
+    async def remove_all_friend(command: Command, client: 'Client', message: MyMessage) -> None:
+        async def remove_all_friend():
+            friend_count_before = len(client.friends)
+            for friend in client.friends:
+                await client.remove_friend(friend, message)
+            friend_count_after = len(client.friends)
+            await message.reply(
+                client.l(
+                    'remove_friends',
+                    friend_count_before - friend_count_after
+                )
+            )
+
+        task = client.loop.create_task(remove_all_friend())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='remove_offline_for',
+        usage='{name} [{client.l("day")}] ({client.l("hour")}) ({client.l("minute")})'
+    )
+    async def remove_offline_for(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        kwargs = {
+            'days': int(message.args[1]),
+            'hours': int(client.bot.get_list_index(message.args, 2, 0)),
+            'minutes': int(client.bot.get_list_index(message.args, 3, 0))
+        }
+        offline_for = datetime.timedelta(**kwargs)
+        utcnow = datetime.datetime.utcnow()
+        friend_count_before = len(client.friends)
+
+        async def remove_offline_for():
+            for friend in client.friends:
+                last_logout = None
+                if friend.last_logout is not None:
+                    last_logout = friend.last_logout
+                if friend.last_logout is None or (friend.created_at > client.booted_at):
+                    last_logout = await friend.fetch_last_logout()
+
+                if last_logout is not None and ((utcnow - last_logout) >= offline_for):
+                    await client.remove_friend(friend, message)
+
+            friend_count_after = len(client.friends)
+            await message.reply(
+                client.l(
+                    'remove_friends',
+                    friend_count_before - friend_count_after
+                )
+            )
+
+        task = client.loop.create_task(remove_offline_for())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='accept_pending',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def accept_pending(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.incoming_pending_friends,
+            me=message.author
+        )
+
+        async def accept_pending(user):
+            ret = await client.accept_request(user, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'accept_pending',
+                        client.name(user)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await accept_pending(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await accept_pending(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='decline_pending',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def decline_pending(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.incoming_pending_friends,
+            me=message.author
+        )
+
+        async def decline_pending(user):
+            ret = await client.decline_request(user, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'decline_pending',
+                        client.name(user)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await decline_pending(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await decline_pending(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='incoming_pending',
+        usage='{name} [{client.commands[accept]}/{client.commands[decline]}]'
+    )
+    async def incoming_pending(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        count_before = len(client.incoming_pending_friends)
+        if message.args[1] in client.commands['accept']:
+            async def incoming_pending():
+                for pending in client.incoming_pending_friends:
+                    await client.accept_request(pending, message)
+                count_after = len(client.incoming_pending_friends)
+                await message.reply(
+                    client.l(
+                        'accept_pendings',
+                        count_before - count_after
+                    )
+                )
+
+            task = client.loop.create_task(incoming_pending())
+            client.stoppable_tasks.append(task)
+        elif message.args[1] in client.commands['decline']:
+            async def incoming_pending():
+                for pending in client.incoming_pending_friends:
+                    await client.decline_request(pending, message)
+                count_after = len(client.incoming_pending_friends)
+                await message.reply(
+                    client.l(
+                        'decline_pendings',
+                        count_before - count_after
+                    )
+                )
+
+            task = client.loop.create_task(incoming_pending())
+            client.stoppable_tasks.append(task)
+        else:
+            await client.show_help(command, message)
+
+    @command(
+        name='cancel_outgoing_pending',
+        usage='{name}'
+    )
+    async def cancel_outgoing_pending(command: Command, client: 'Client', message: MyMessage) -> None:
+        async def cancel_outgoing_pending():
+            count_before = len(client.outgoing_pending_friends)
+            for pending in client.outgoing_pending_friends:
+                await client.decline_request(pending, message)
+            count_after = len(client.outgoing_pending_friends)
+            await message.reply(
+                client.l(
+                    'remove_pendings',
+                    count_before - count_after
+                )
+            )
+
+        task = client.loop.create_task(cancel_outgoing_pending())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='block_user',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def block_user(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            me=message.author
+        )
+        user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
+        if user is not None and user not in users:
+            users.append(user)
+
+        async def block_user(user):
+            if client.is_blocked(user.id):
+                await message.reply(
+                    client.l(
+                        'already_blocked',
+                        client.name(user)
+                    )
+                )
+
+            ret = await client.user_block(user, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'block_user',
+                        client.name(user)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await block_user(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await block_user(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='unblock_user',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def unblock_user(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.blocked_users,
+            me=message.author
+        )
+
+        async def unblock_user(user):
+            blocked_user = client.get_blocked_user(user.id)
+            if blocked_user is None:
+                await message.reply(
+                    client.l(
+                        'not_blocking_user',
+                        client.name(user)
+                    )
+                )
+
+            ret = await client.user_unblock(blocked_user, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'unblock_user',
+                        client.name(blocked_user)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await unblock_user(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await unblock_user(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='unblock_all_user',
+        usage='{name}'
+    )
+    async def unblock_all_user(command: Command, client: 'Client', message: MyMessage) -> None:
+        async def unblock_all_user():
+            block_count_before = len(client.blocked_users)
+            for blocked_user in client.blocked_users:
+                await client.unblock_user(blocked_user)
+            block_count_after = len(client.blocked_users)
+            await message.reply(
+                client.l(
+                    'unblock_users',
+                    block_count_before - block_count_after
+                )
+            )
+
+        task = client.loop.create_task(unblock_all_user())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='join',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def join(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        async def join(user):
+            friend = client.get_friend(user.id)
+            if friend is None:
+                await message.reply(
+                    client.l(
+                        'not_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.join_party_friend(friend, message)
+            if not isinstance(ret, Exception):
+                if client.config['loglevel'] == 'normal':
+                    await message.reply(
+                        client.l(
+                            'party_join_friend',
+                            client.name(friend)
+                        )
+                    )
+                else:
+                    await message.reply(
+                        client.l(
+                            'party_join_friend_info',
+                            client.name(friend),
+                            ret.id
+                        )
+                    )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await join(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await join(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='join_id',
+        usage='{name} [{client.l("party_id")}]'
+    )
+    async def join_id(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        ret = await client.join_party_id(message.args[1], message)
+        if not isinstance(ret, Exception):
+            if client.config['loglevel'] == 'normal':
+                await message.reply(
+                    client.l('party_join')
+                )
+            else:
+                await message.reply(
+                    client.l(
+                        'party_join_info',
+                        ret.id
+                    )
+                )
+
+    @command(
+        name='request_to_join',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def request_to_join(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        async def request_to_join(user):
+            friend = client.get_friend(user.id)
+            if friend is None:
+                await message.reply(
+                    client.l(
+                        'not_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+            
+            ret = await client.send_join_request(friend, message)
+            if not isinstance(ret, Exception):
+                if client.config['loglevel'] == 'normal':
+                    await message.reply(
+                        client.l(
+                            'join_request_sent',
+                            client.name(friend)
+                        )
+                    )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await request_to_join(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await request_to_join(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='leave',
+        usage='{name}'
+    )
+    async def leave(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.party.me.leave()
+        if client.config['loglevel'] == 'normal':
+            await message.reply(
+                client.l('party_leave')
+            )
+        else:
+            await message.reply(
+                client.l(
+                    'party_leave_info',
+                    client.party.id
+                )
+            )
+
+    @command(
+        name='invite',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def invite(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        async def invite(user):
+            friend = client.get_friend(user.id)
+            if friend is None:
+                await message.reply(
+                    client.l(
+                        'not_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.invite_friend(friend, message)
+            if not isinstance(ret, Exception):
+                if client.config['loglevel'] == 'normal':
+                    await message.reply(
+                        client.l(
+                            'user_invite',
+                            client.name(friend)
+                        )
+                    )
+                else:
+                    await message.reply(
+                        client.l(
+                            'user_invite_info',
+                            client.name(friend),
+                            client.party.id
+                        )
+                    )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await invite(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await invite(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='invite_list_users',
+        usage='{name}'
+    )
+    async def invite_list_users(command: Command, client: 'Client', message: MyMessage) -> None:
+        users = [user for user in client.invitelist
+                 if isinstance(user, fortnitepy.Friend)]
+        if len(users) == 0:
+            return
+
+        tasks = [
+            client.loop.create_task(client.invite_friend(user, message))
+            for user in users
+        ]
+        await asyncio.gather(*tasks)
+        if client.config['loglevel'] == 'normal':
+            await message.reply(
+                client.l('invitelist_invite')
+            )
+        else:
+            await message.reply(
+                client.l(
+                    'invitelist_invite_info',
+                    client.party.id
+                )
+            )
+
+    @command(
+        name='message',
+        usage='{name} [{client.l("name_or_id")}] : [{client.l("message")}]'
+    )
+    async def message(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        text = ' '.join(message.args[1:]).split(' : ')
+        if len(text) < 2:
+            await client.show_help(command, message)
+            return
+
+        user_name, content = text
+
+        users = client.find_users(
+            user_name,
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.friends,
+            me=message.author
+        )
+
+        async def send_message(user):
+            friend = client.get_friend(user.id)
+            if friend is None:
+                await message.reply(
+                    client.l(
+                        'not_friend_with_user',
+                        client.name(user)
+                    )
+                )
+                return
+
+            await friend.send(content)
+            await message.reply(
+                client.l(
+                    'sent_message',
+                    client.name(friend),
+                    content
+                )
+            )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    user_name
+                )
+            )
+        elif len(users) == 1:
+            await send_message(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await send_message(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='party_message',
+        usage='{name} [{client.l("message")}]'
+    )
+    async def party_message(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        await client.party.send(
+            ' '.join(message.args[1:])
+        )
+        if client.config['loglevel'] == 'normal':
+            await message.reply(
+                client.l(
+                    'sent_party_message',
+                    ' '.join(message.args[1:])
+                )
+            )
+        else:
+            await message.reply(
+                client.l(
+                    'sent_party_message_info',
+                    ' '.join(message.args[1:]),
+                    client.party.id
+                )
+            )
+
+
+    @command(
+        name='status',
+        usage='{name} [{client.l("message")}]'
+    )
+    async def status(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.set_presence(' '.join(message.args[1:]))
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('status'),
+                ' '.join(message.args[1:])
+            )
+        )
+
+    @command(
+        name='banner',
+        usage='{name} [ID] [{client.l("color")}]'
+    )
+    async def banner(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 3:
+            await client.show_help(command, message)
+            return
+
+        await client.party.me.edit_and_keep(partial(
+            client.party.me.set_banner,
+            icon=message.args[1],
+            color=message.args[2]
+        ))
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('banner'),
+                f'{message.args[1]}, {message.args[2]}'
+            )
+        )
+
+    @command(
+        name='level',
+        usage='{name} [{client.l("number")}]'
+    )
+    async def level(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            level = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_value')
+            )
+            return
+        await client.party.me.edit_and_keep(partial(
+            client.party.me.set_battlepass_info,
+            has_purchased=True,
+            level=level
+        ))
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('level'),
+                level
+            )
+        )
+
+    @command(
+        name='battlepass',
+        usage='{name} [{client.l("number")}]'
+    )    
+    async def battlepass(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            tier = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_value')
+            )
+            return
+        await client.party.me.edit_and_keep(partial(
+            client.party.me.set_battlepass_info,
+            has_purchased=True,
+            level=tier
+        ))
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('tier'),
+                tier
+            )
+        )
+
+    @command(
+        name='privacy',
+        usage='{name} [{client.l("privacy")}]'
+    )
+    async def privacy(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        if not client.party.me.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+
+        privacies = [
+            (p.name.lower(), p) for p in PartyPrivacy
+        ]
+        for p, value in privacies:
+            if message.args[1] in client.commands[p]:
+                try:
+                    await client.party.set_privacy(value)
+                except fortnitepy.Forbidden as e:
+                    client.debug_print_exception(e)
+                    await message.reply(
+                        client.l('not_a_party_leader')
+                    )
+                    return
+                await message.reply(
+                    client.l(
+                        'set_to',
+                        client.l('privacy'),
+                        client.bot.l(f'privacy_{p}')
+                    )
+                )
+                break
+        else:
+            await message.reply(
+                client.l(
+                    'must_be_one_of',
+                    client.l('privacy'),
+                    [client.commands[p][0] for p in privacies]
+                )
+            )
+
+    @command(
+        name='voice_chat',
+        usage=(
+            '{name} [{client.l("bool", **self.variables_without_self)}]\n'
+            '{client.l("current_setting", client.l("enabled") '
+            'if client.party.voice_chat_enabled else '
+            'client.l("disabled"))}'
+        )
+    )
+    async def voice_chat(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        if not client.party.me.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+
+        if message.args[1] in client.commands['true']:
+            try:
+                await client.party.enable_voice_chat()
+            except fortnitepy.Forbidden as e:
+                client.debug_print_exception(e)
+                await message.reply(
+                    client.l('not_a_party_leader')
+                )
+                return
+            await message.reply(
+                client.l(
+                    'set_to',
+                    client.l('voice_chat'),
+                    client.l('enabled')
+                )
+            )
+        elif message.args[1] in client.commands['false']:
+            try:
+                await client.party.disable_voice_chat()
+            except fortnitepy.Forbidden as e:
+                client.debug_print_exception(e)
+                await message.reply(
+                    client.l('not_a_party_leader')
+                )
+                return
+            await message.reply(
+                client.l(
+                    'set_to',
+                    client.l('voice_chat'),
+                    client.l('disabled')
+                )
+            )
+        else:
+            await client.show_help(command, message)
+
+    @command(
+        name='promote',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def promote(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        if not client.party.me.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.party.members,
+            me=message.author
+        )
+
+        async def promote(user):
+            member = client.party.get_member(user.id)
+            if member is None:
+                await message.reply(
+                    client.l(
+                        'not_in_party',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.promote_member(member, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'promote',
+                        client.name(member)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await promote(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await promote(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='kick',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def kick(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        if not client.party.me.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.party.members,
+            me=message.author
+        )
+
+        async def kick(user):
+            member = client.party.get_member(user.id)
+            if member is None:
+                await message.reply(
+                    client.l(
+                        'not_in_party',
+                        client.name(user)
+                    )
+                )
+                return
+
+            ret = await client.kick_member(member, message)
+            if not isinstance(ret, Exception):
+                party = client.party
+                if message.is_party_message() and party is not None:
+                    remaining = [
+                        current
+                        for current in party.members
+                        if current.id not in (client.user.id, member.id)
+                    ]
+                    if not remaining:
+                        return
+                await message.reply(
+                    client.l(
+                        'kick',
+                        client.name(member)
+                    )
+                )
+
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await kick(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await kick(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+
+    @command(
+        name='hide',
+        usage='{name} ({client.l("name_or_id")})'
+    )
+    async def hide(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            count = 0
+            for member in client.party.members:
+                if client.is_hide_for(client.get_user_type(member.id)):
+                    if client.party.add_hide_user(member.id):
+                        count += 1
+            try:
+                await client.party.refresh_squad_assignments()
+            except Exception as e:
+                if isinstance(e, fortnitepy.HTTPException):
+                    client.debug_print_exception(e)
+                else:
+                    client.print_exception(e)
+                text = client.l('error_while_hiding_members')
+                client.send(
+                    text,
+                    add_p=client.time,
+                    file=sys.stderr
+                )
+                if message is not None:
+                    await message.reply(text)
+                return
+            await message.reply(
+                client.l(
+                    'hide_members',
+                    count
+                )
+            )
+        else:
+            if not client.party.me.leader:
+                await message.reply(
+                    client.l('not_a_party_leader')
+                )
+                return
+
+            users = client.find_users(
+                ' '.join(message.args[1:]),
+                mode=FindUserMode.NAME_ID,
+                method=FindUserMatchMethod.CONTAINS,
+                users=client.party.members,
+                me=message.author
+            )
+
+            async def hide(user):
+                member = client.party.get_member(user.id)
+                if member is None:
+                    await message.reply(
+                        client.l(
+                            'not_in_party',
+                            client.name(user)
+                        )
+                    )
+                    return
+
+                ret = await client.hide_member(member, message)
+                if not isinstance(ret, Exception):
+                    await message.reply(
+                        client.l(
+                            'hide',
+                            client.name(member)
+                        )
+                    )
+
+            if client.config['search_max'] and len(users) > client.config['search_max']:
+                await message.reply(
+                    client.l('too_many', client.l('user'), len(users))
+                )
+                return
+
+            if len(users) == 0:
+                await message.reply(
+                    client.l(
+                        'not_found',
+                        client.l('user'),
+                        ' '.join(message.args[1:])
+                    )
+                )
+            elif len(users) == 1:
+                await hide(users[0])
+            else:
+                client.select[message.author.id] = {
+                    'exec': 'await hide(user)',
+                    'globals': {**globals(), **locals()},
+                    'variables': [
+                        {'user': user}
+                        for user in users
+                    ]
+                }
+                await message.reply(
+                    ('\n'.join([f'{num}: {client.name(user)}'
+                                for num, user in enumerate(users, 1)])
+                        + '\n' + client.l('enter_number_to_select', client.l('user')))
+                )
+
+    @command(
+        name='show',
+        usage='{name} ({client.l("name_or_id")})'
+    )
+    async def show(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.party.me.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+
+        if len(message.args) < 2:
+            count = 0
+            for member in client.party.members:
+                if client.party.remove_hide_user(member.id):
+                    count += 1
+            client.party.update_hide_users([])
+            try:
+                await client.party.refresh_squad_assignments()
+            except Exception as e:
+                if isinstance(e, fortnitepy.HTTPException):
+                    client.debug_print_exception(e)
+                else:
+                    client.print_exception(e)
+                text = client.l('error_while_showing_members')
+                client.send(
+                    text,
+                    add_p=client.time,
+                    file=sys.stderr
+                )
+                if message is not None:
+                    await message.reply(text)
+                return
+            await message.reply(
+                client.l(
+                    'show_members',
+                    count
+                )
+            )
+        else:
+            users = client.find_users(
+                ' '.join(message.args[1:]),
+                mode=FindUserMode.NAME_ID,
+                method=FindUserMatchMethod.CONTAINS,
+                users=client.party.members,
+                me=message.author
+            )
+
+            async def show(user):
+                member = client.party.get_member(user.id)
+                if member is None:
+                    await message.reply(
+                        client.l(
+                            'not_in_party',
+                            client.name(user)
+                        )
+                    )
+                    return
+
+                ret = await client.show_member(member, message)
+                if not isinstance(ret, Exception):
+                    await message.reply(
+                        client.l(
+                            'show',
+                            client.name(member)
+                        )
+                    )
+
+            if client.config['search_max'] and len(users) > client.config['search_max']:
+                await message.reply(
+                    client.l('too_many', client.l('user'), len(users))
+                )
+                return
+
+            if len(users) == 0:
+                await message.reply(
+                    client.l(
+                        'not_found',
+                        client.l('user'),
+                        ' '.join(message.args[1:])
+                    )
+                )
+            elif len(users) == 1:
+                await show(users[0])
+            else:
+                client.select[message.author.id] = {
+                    'exec': 'await show(user)',
+                    'globals': {**globals(), **locals()},
+                    'variables': [
+                        {'user': user}
+                        for user in users
+                    ]
+                }
+                await message.reply(
+                    ('\n'.join([f'{num}: {client.name(user)}'
+                                for num, user in enumerate(users, 1)])
+                        + '\n' + client.l('enter_number_to_select', client.l('user')))
+                )
+
+    @command(
+        name='ready',
+        usage='{name}'
+    )
+    async def ready(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.party.me.set_ready(fortnitepy.ReadyState.READY)
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('ready_state'),
+                client.l('ready_state_ready')
+            )
+        )
+
+    @command(
+        name='unready',
+        usage='{name}'
+    )
+    async def unready(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.party.me.set_ready(fortnitepy.ReadyState.NOT_READY)
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('ready_state'),
+                client.l('ready_state_unready')
+            )
+        )
+
+    @command(
+        name='sitout',
+        usage='{name}'
+    )
+    async def sitout(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.party.me.set_ready(fortnitepy.ReadyState.SITTING_OUT)
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('ready_state'),
+                client.l('ready_state_sitout')
+            )
+        )
+
+    @command(
+        name='match',
+        usage='{name} ({client.l("number")})'
+    )
+    async def match(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            players_left = 100
+        else:
+            try:
+                players_left = int(message.args[1])
+            except ValueError as e:
+                client.debug_print_exception(e)
+                await message.reply(
+                    client.l('please_enter_valid_number')
+                )
+                return
+
+        await client.party.me.set_in_match(
+            players_left=players_left
+        )
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('match_state'),
+                client.l(
+                    'players_left',
+                    players_left
                 )
             )
         )
 
-    async def call_command(self, command: Command, message: MyMessage) -> None:
-        try:
-            await command.callback(self, message)
-        except rebootpy.ChatError as e:
-            self.debug_print_exception(e)
-        except Exception as e:
-            self.print_exception(e)
-            try:
-                await message.reply(
-                    self.l('error') + f'\n{e.__class__.__name__}'
-                )
-            except rebootpy.ChatError as reply_error:
-                self.debug_print_exception(reply_error)
+    @command(
+        name='unmatch',
+        usage='{name}'
+    )
+    async def unmatch(command: Command, client: 'Client', message: MyMessage) -> None:
+        await client.party.me.clear_in_match()
+        await message.reply(
+            client.l(
+                'set_to',
+                client.l('match_state'),
+                client.l('off')
+            )
+        )
 
-    async def process_command(self, message: MyMessage, prefixes: Optional[list]) -> None:
-        if not message.args:
+    @command(
+        name='swap',
+        usage='{name} [{client.l("name_or_id")}]'
+    )
+    async def swap(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
             return
 
-        execute = True
-        prefix_length = 0
-        if prefixes:
-            for prefix in prefixes:
-                if message.content.startswith(prefix):
-                    prefix_length = len(prefix)
-                    break
-            else:
-                execute = False
-        content = message.content[prefix_length:]
-        args = re.split(r'\s', content)
+        users = client.find_users(
+            ' '.join(message.args[1:]),
+            mode=FindUserMode.NAME_ID,
+            method=FindUserMatchMethod.CONTAINS,
+            users=client.party.members,
+            me=message.author
+        )
 
-        async def replies():
-            flag = False
-            if self.replies['prefix_to_replies']:
-                if execute:
-                    flag = True
-            else:
-                flag = True
-
-            if not flag:
-                return False
-
-            for word in self.replies['replies']:
-                if word in self.disabled_replies or not word.get('word'):
-                    continue
-
-                flag = False
-                if word['matchmethod'] == 'full' and word['word'] == content:
-                    flag = True
-                elif word['matchmethod'] == 'contains' and word['word'] in content:
-                    flag = True
-                elif word['matchmethod'] == 'starts' and content.startswith(word['word']):
-                    flag = True
-                elif word['matchmethod'] == 'ends' and content.endswith(word['word']):
-                    flag = True
-                if flag:
-                    def remove():
-                        if word in self.disabled_replies:
-                            self.disabled_replies.remove(word)
-
-                    var = self.variables
-                    var.update({
-                        'message': message,
-                        'author': message.author,
-                        'author_display_name': message.author.display_name,
-                        'author_id': message.author.id
-                    })
-                    text = self.eval_format('\n'.join(word['reply']), var)
-                    if text is None or not str(text).strip():
-                        continue
-                    if word['ct']:
-                        self.disabled_replies.append(word)
-                        self.loop.call_later(
-                            word['ct'],
-                            remove
-                        )
-                    await message.reply(text)
-                    return True
-            return False
-
-        if self.replies['run_when'] == 'before_command':
-            if await replies():
-                return
-
-        executed = False
-        if execute:
-            message.prev = self.prev.get(message.author.id)
-            arg = args[0]
-            if self.config['case_insensitive']:
-                arg = jaconv.kata2hira(arg.lower())
-            if self.config['convert_kanji']:
-                arg = self.bot.converter.do(arg)
-
-            async def missing_permission():
+        async def swap(user):
+            member = client.party.get_member(user.id)
+            if member is None:
                 await message.reply(
-                    self.l('missing_permission')
+                    client.l(
+                        'not_in_party',
+                        client.name(user)
+                    )
                 )
-                if not message.is_discord_message():
-                    functions = await self.get_permission_command_operation(user_id=message.author.id)
-                    for func in functions:
-                        try:
-                            if asyncio.iscoroutinefunction(func):
-                                await func()
-                            else:
-                                func()
-                        except Exception as e:
-                            self.print_exception(e)
+                return
 
-            async def custom_commands():
-                for command in self.custom_commands['commands']:
-                    if command['word'] == content:
-                        if message.user_type in command['allow_for']:
-                            try:
-                                var = self.variables
-                                var.update({
-                                    'message': message,
-                                    'author': message.author,
-                                    'author_display_name': message.author.display_name,
-                                    'author_id': message.author.id
-                                })
-                                await self.bot.aexec('\n'.join(command['run']), var)
-                            except Exception as e:
-                                self.debug_print_exception(e)
-                                for line in command['run']:
-                                    try:
-                                        var = self.variables
-                                        var.update({
-                                            'message': message,
-                                            'author': message.author,
-                                            'author_display_name': message.author.display_name,
-                                            'author_id': message.author.id
-                                        })
-                                        await self.bot.aexec(line, var)
-                                    except Exception as e:
-                                        self.debug_print_exception(e)
-                                        mes = DummyMessage(self, message, content=line)
-                                        await self.process_command(MyMessage(self, mes), None)
-                                        if self.config['loglevel'] == 'debug':
-                                            self.send(
-                                                mes.result,
-                                                color=yellow
-                                            )
-                        else:
-                            await missing_permission()
-                        return True
-                return False
+            ret = await client.swap_member(member, message)
+            if not isinstance(ret, Exception):
+                await message.reply(
+                    client.l(
+                        'swap',
+                        client.name(member)
+                    )
+                )
 
-            if self.custom_commands['run_when'] == 'before_command':
-                if await custom_commands():
+        if client.config['search_max'] and len(users) > client.config['search_max']:
+            await message.reply(
+                client.l('too_many', client.l('user'), len(users))
+            )
+            return
+
+        if len(users) == 0:
+            await message.reply(
+                client.l(
+                    'not_found',
+                    client.l('user'),
+                    ' '.join(message.args[1:])
+                )
+            )
+        elif len(users) == 1:
+            await swap(users[0])
+        else:
+            client.select[message.author.id] = {
+                'exec': 'await swap(user)',
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'user': user}
+                    for user in users
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {client.name(user)}'
+                            for num, user in enumerate(users, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.l('user')))
+            )
+
+    @command(
+        name='stop',
+        usage='{name}'
+    )
+    async def stop(command: Command, client: 'Client', message: MyMessage) -> None:
+        for num in reversed(range(len(client.stoppable_tasks))):
+            exc = None
+            task = client.stoppable_tasks[num]
+            if task.done():
+                exc = task.exception()
+            if exc is not None:
+                client.debug_print_exception(exc)
+            task.cancel()
+            del task
+
+        await message.reply(
+            client.l('stopped')
+        )
+
+    @command(
+        name='new_items',
+        usage='{name}'
+    )
+    async def new_items(command: Command, client: 'Client', message: MyMessage) -> None:
+        async def new_items():
+            for item in client.bot.new_items.values():
+                attr = f'is_{client.bot.convert_backend_to_key(item["type"]["backendValue"])}_lock_for'
+                if not getattr(client, attr)(message.user_type):
+                    await client.party.me.change_asset(
+                        item['type']['backendValue'],
+                        item['id'],
+                        keep=False
+                    )
+                    await message.reply(
+                        f'{item["type"]["displayValue"]}: {client.name_cosmetic(item)}'
+                    )
+                    await asyncio.sleep(5)
+                else:
+                    await message.reply(
+                        client.l('cosmetic_locked')
+                    )
                     return
+            await message.reply(
+                client.l(
+                    'has_end',
+                    client.l('new_items')
+                )
+            )
 
-            tasks = []
-            for identifier, command in self.all_commands.items():
-                try:
-                    if command.discord_required and self.discord_client is None:
+        task = client.loop.create_task(new_items())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='shop_items',
+        usage='{name}'
+    )
+    async def shop_items(command: Command, client: 'Client', message: MyMessage) -> None:
+        async def shop_items():
+            try:
+                shop = await client.fetch_item_shop()
+            except fortnitepy.HTTPException as e:
+                m = 'errors.com.epicgames.common.missing_action'
+                if e.message_code == m:
+                    client.debug_print_exception(e)
+                    await client.auth.accept_eula()
+                    shop = await client.fetch_item_shop()
+                else:
+                    raise
+            items = []
+            entries = (sorted(shop.featured_items, key=lambda x: x.sort_priority, reverse=True)
+                       + sorted(shop.daily_items, key=lambda x: x.sort_priority, reverse=True)
+                       + sorted(shop.special_featured_items, key=lambda x: x.sort_priority, reverse=True)
+                       + sorted(shop.special_daily_items, key=lambda x: x.sort_priority, reverse=True))
+            for entry in entries:
+                for item in entry.grants:
+                    if item['type'] not in ['AthenaCharacter',
+                                            'AthenaBackpack',
+                                            'AthenaPet',
+                                            'AthenaPetCarrier',
+                                            'AthenaPickaxe',
+                                            'AthenaDance',
+                                            'AthenaEmoji',
+                                            'AthenaToy']:
                         continue
+                    items.append({
+                        'name': client.bot.main_items.get(item['asset'], {}).get('name'),
+                        'id': item['asset'],
+                        'type': {
+                            'value': client.bot.convert_backend_type(item['type']),
+                            'displayValue': (
+                                client.bot.l(
+                                    client.bot.convert_backend_type(item['type'])
+                                )
+                                or client.bot.convert_backend_type(item['type'])
+                            ),
+                            'backendValue': item['type']
+                        }
+                    })
+            for item in items:
+                attr = f'is_{client.bot.convert_backend_to_key(item["type"]["backendValue"])}_lock_for'
+                if not getattr(client, attr)(message.user_type):
+                    await client.party.me.change_asset(
+                        item['type']['backendValue'],
+                        item['id'],
+                        keep=False
+                    )
+                    await message.reply(
+                        f'{item["type"]["displayValue"]}: {client.name_cosmetic(item)}'
+                    )
+                    await asyncio.sleep(5)
 
-                    words = self.commands['commands'][identifier]
-                    if self.config['case_insensitive']:
-                        words = [jaconv.kata2hira(word.lower()) for word in words]
-                    if self.config['convert_kanji']:
-                        words = [self.bot.converter.do(word) for word in words]
-                    if arg in words:
-                        executed = True
-                        if (message.user_type == 'owner'
-                                or (identifier.lower() in self.whitelist_commands
-                                    and message.user_type in ['owner', 'whitelist'])
-                                or identifier.lower() in self.user_commands):
-                            tasks.append(
-                                self.loop.create_task(self.call_command(command, message))
-                            )
-
-                            if self.user.id not in self.bot.command_stats:
-                                self.bot.command_stats[self.user.id] = {'commands': {}, 'ngs': {}}
-                            stats = self.bot.command_stats[self.user.id]
-                            if str(message.author.id) not in stats['commands']:
-                                stats['commands'][str(message.author.id)] = {}
-                            if identifier not in stats['commands'][str(message.author.id)]:
-                                stats['commands'][str(message.author.id)][identifier] = 0
-                            stats['commands'][str(message.author.id)][identifier] += 1
-                        else:
-                            await missing_permission()
-                        break
-                except KeyError as e:
-                    self.debug_print_exception(e)
-
-            if len(tasks) > 0:
-                await asyncio.gather(*tasks)
-
-            if not executed and self.custom_commands['run_when'] == 'after_command':
-                if await custom_commands():
-                    return
-
-            self.prev[message.author.id] = message
-
-        execute_item_search = message.user_type == 'owner'
-        if not execute_item_search:
-            if self.commands['prefix_to_item_search']:
-                execute_item_search = execute
-            else:
-                execute_item_search = True
-        if execute_item_search:
-            select = self.select.get(message.author.id)
-            if select is not None:
-                if not content.isdigit():
-                    self.select.pop(message.author.id, None)
                 else:
-                    executed = True
-                    num = int(content) - 1
-                    if not 0 <= num < len(select['variables']):
-                        await message.reply(self.l('please_enter_valid_number'))
-                        return
-                    self.select.pop(message.author.id, None)
-                    variables = {**select['globals'], **select['variables'][num]}
-                    await self.bot.aexec(select['exec'], variables)
-                    return
+                    await message.reply(
+                        client.l('cosmetic_locked')
+                    )
+            await message.reply(
+                client.l(
+                    'has_end',
+                    client.l('shop_items')
+                )
+            )
 
-        if self.replies['run_when'] == 'after_command':
-            if await replies():
+        task = client.loop.create_task(shop_items())
+        client.stoppable_tasks.append(task)
+
+    @command(
+        name='enlightenment',
+        usage='{name} [{client.l("season")}] [{client.l("number")}]'
+    )
+    async def enlightenment(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 3:
+            await client.show_help(command, message)
+            return
+
+        try:
+            season = int(message.args[1])
+            number = int(message.args[2])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        if not client.is_outfit_lock_for(message.user_type):
+            await client.party.me.set_outfit(
+                enlightenment=(season, number)
+            )
+            await message.reply(
+                client.l(
+                    'set_to',
+                    'enlightenment',
+                    f'{season}, {number}'
+                )
+            )
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='corruption',
+        usage='{name} [{client.l("number")}]'
+    )
+    async def corruption(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            number = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        if not client.is_outfit_lock_for(message.user_type):
+            await client.party.me.set_outfit(
+                corruption=number
+            )
+            await message.reply(
+                client.l(
+                    'set_to',
+                    'corruption',
+                    number
+                )
+            )
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+
+    @command(
+        name='all_outfit',
+        usage='{name}'
+    )
+    async def all_outfit(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaCharacter', client, message)
+
+    @command(
+        name='all_backpack',
+        usage='{name}'
+    )
+    async def all_backpack(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaBackpack', client, message)
+
+    @command(
+        name='all_pet',
+        usage='{name}'
+    )
+    async def all_pet(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaPet,AthenaPetCarrier', client, message)
+
+    @command(
+        name='all_pickaxe',
+        usage='{name}'
+    )
+    async def all_pickaxe(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaCharacter', client, message)
+
+    @command(
+        name='all_emote',
+        usage='{name}'
+    )
+    async def all_emote(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaDance', client, message)
+
+    @command(
+        name='all_emoji',
+        usage='{name}'
+    )
+    async def all_emoji(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaEmoji', client, message)
+
+    @command(
+        name='all_toy',
+        usage='{name}'
+    )
+    async def all_toy(command: Command, client: 'Client', message: MyMessage) -> None:
+        await all_cosmetics('AthenaToy', client, message)
+
+    @command(
+        name='cid',
+        usage='{name} [ID]'
+    )
+    async def cid(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaCharacter', 'id', command, client, message)
+
+    @command(
+        name='bid',
+        usage='{name} [ID]'
+    )
+    async def bid(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaBackpack', 'id', command, client, message)
+
+    @command(
+        name='petcarrier',
+        usage='{name} [ID]'
+    )
+    async def petcarrier(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaPet,AthenaPetCarrier', 'id', command, client, message)
+
+    @command(
+        name='pickaxe_id',
+        usage='{name} [ID]'
+    )
+    async def pickaxe_id(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaPickaxe', 'id', command, client, message)
+
+    @command(
+        name='eid',
+        usage='{name} [ID]'
+    )
+    async def eid(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaDance', 'id', command, client, message)
+
+    @command(
+        name='emoji_id',
+        usage='{name} [ID]'
+    )
+    async def emoji_id(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaEmoji', 'id', command, client, message)
+
+    @command(
+        name='toy_id',
+        usage='{name} [ID]'
+    )
+    async def toy_id(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaToy', 'id', command, client, message)
+
+    @command(
+        name='id',
+        usage='{name} [ID]'
+    )
+    async def id(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search(None, 'id', command, client, message)
+
+    @command(
+        name='outfit',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def outfit(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaCharacter', 'name', command, client, message)
+
+    @command(
+        name='random_outfit',
+        usage='{name}'
+    )
+    async def random_outfit(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaCharacter', command, client, message)
+
+    @command(
+        name='clear_outfit',
+        usage='{name}'
+    )
+    async def clear_outfit(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.is_outfit_lock_for(message.user_type):
+            await client.party.me.change_asset('AthenaCharacter', '')
+            await message.reply(client.l('cleared'))
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='backpack',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def backpack(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaBackpack', 'name', command, client, message)
+
+    @command(
+        name='random_backpack',
+        usage='{name}'
+    )
+    async def random_backpack(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaBackpack', command, client, message)
+
+    @command(
+        name='pet',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def pet(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaPet,AthenaPetCarrier', 'name', command, client, message)
+
+    @command(
+        name='random_pet',
+        usage='{name}'
+    )
+    async def random_pet(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaPet,AthenaPerCarrier', command, client, message)
+
+    @command(
+        name='clear_backpack',
+        usage='{name}'
+    )
+    async def clear_backpack(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.is_backpack_lock_for(message.user_type):
+            await client.party.me.change_asset('AthenaBackpack', '')
+            await message.reply(client.l('cleared'))
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='pickaxe',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def pickaxe(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaPickaxe', 'name', command, client, message)
+
+    @command(
+        name='random_pickaxe',
+        usage='{name}'
+    )
+    async def random_pickaxe(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaPickaxe', command, client, message)
+
+    @command(
+        name='clear_pickaxe',
+        usage='{name}'
+    )
+    async def clear_pickaxe(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.is_pickaxe_lock_for(message.user_type):
+            await client.party.me.change_asset('AthenaPickaxe', '')
+            await message.reply(client.l('cleared'))
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='emote',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def emote(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaDance', 'name', command, client, message)
+
+    @command(
+        name='random_emote',
+        usage='{name}'
+    )
+    async def random_emote(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaDance', command, client, message)
+
+    @command(
+        name='emoji',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def emoji(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaEmoji', 'name', command, client, message)
+
+    @command(
+        name='random_emoji',
+        usage='{name}'
+    )
+    async def random_emoji(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaEmoji', command, client, message)
+
+    @command(
+        name='toy',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def toy(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search('AthenaToy', 'name', command, client, message)
+
+    @command(
+        name='random_toy',
+        usage='{name}'
+    )
+    async def random_toy(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic('AthenaToy', command, client, message)
+
+    @command(
+        name='clear_emote',
+        usage='{name}'
+    )
+    async def clear_emote(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.is_emote_lock_for(message.user_type):
+            await client.party.me.change_asset('AthenaDance', '')
+            await message.reply(client.l('cleared'))
+        else:
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+
+    @command(
+        name='item',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def item(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search(None, 'name', command, client, message)
+
+    @command(
+        name='random_item',
+        usage='{name}'
+    )
+    async def random_item(command: Command, client: 'Client', message: MyMessage) -> None:
+        await random_cosmetic(None, command, client, message)
+
+    @command(
+        name='playlist_id',
+        usage='{name} [ID]'
+    )
+    async def playlist_id(command: Command, client: 'Client', message: MyMessage) -> None:
+        await playlist_search('id', command, client, message)
+
+    @command(
+        name='playlist',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def playlist(command: Command, client: 'Client', message: MyMessage) -> None:
+        await playlist_search('name', command, client, message)
+
+    @command(
+        name='crowns',
+        usage='{name} [{client.l("number")}]'
+    )
+    async def crowns(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        try:
+            crowns_count = int(message.args[1])
+        except ValueError as e:
+            client.debug_print_exception(e)
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        if crowns_count < 0:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        await client.party.me.set_victory_crowns(crowns_count)
+        client.config['fortnite']['crowns'] = crowns_count
+        client.bot.save_json('config', client.bot.config)
+        await client.party.me.clear_emote()
+        await client.party.me.set_emote('EID_Coronet')
+
+        await message.reply(
+            client.l(
+                'set_to',
+                client.bot.l('crowns'),
+                crowns_count
+            )
+        )
+
+    @command(
+        name='island_code',
+        usage='{name} [{client.l("island_code")}]'
+    )
+    async def island_code(command: Command, client: 'Client', message: MyMessage) -> None:
+        if not client.party.leader:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+        meta = client.party.meta
+        data = (meta.get_prop('Default:PlaylistData_j'))['PlaylistData']
+        data['playlistName'] = 'Playlist_PlaygroundV2'
+        data['mnemonic'] = message.args[1]
+
+        final = {'PlaylistData': data}
+        key = 'Default:PlaylistData_j'
+        prop = {key: meta.set_prop(key, final)}
+
+        try:
+            await client.party.patch(updated=prop)
+        except fortnitepy.Forbidden:
+            await message.reply(
+                client.l('not_a_party_leader')
+            )
+            return
+        await message.reply(
+            client.l(
+                'set_to',
+                client.bot.l('playlist'),
+                message.args[1]
+            )
+        )
+
+    @command(
+        name='set',
+        usage='{name} [{client.l("name")}]'
+    )
+    async def set_(command: Command, client: 'Client', message: MyMessage) -> None:
+        await cosmetic_search(None, 'set', command, client, message)
+
+    @command(
+        name='set_style',
+        usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}]'
+    )
+    async def set_style(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
+
+        for k in ['outfit', 'backpack', 'pickaxe']:
+            if message.args[1] in client.commands[k]:
+                key = k
+                break
+        else:
+            await client.show_help(command, message)
+            return
+
+        item = client.bot.convert_to_backend_type(key)
+        asset = client.party.me.asset(item)
+        enlightenment = client.party.me.enlightenments
+        styles = client.searcher.get_style(asset)
+
+        async def set_style(style):
+            attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+            if getattr(client, attr)(message.user_type):
+                await message.reply(
+                    client.l('cosmetic_locked')
+                )
                 return
+            await client.party.me.change_asset(
+                item,
+                asset,
+                variants=style['variants'],
+                enlightenment=enlightenment,
+            )
 
-        if not executed and execute_item_search:
-            lookup_value = content.strip().casefold()
-            exact_cosmetic = None
-            for collection in (self.searcher.main_items, self.searcher.sub_items):
-                for cosmetic in collection.values():
-                    item_id = str(cosmetic.get('id') or '')
-                    item_name = str(cosmetic.get('name') or '')
-                    if item_id.casefold() == lookup_value:
-                        exact_cosmetic = cosmetic
-                        break
-                    if item_name.casefold() == lookup_value:
-                        exact_cosmetic = cosmetic
-                        break
-                if exact_cosmetic is not None:
-                    break
+        if len(styles) == 0:
+            await message.reply(
+                client.l('no_style_change')
+            )
+        else:
+            client.select[message.author.id] = {
+                'exec': (
+                    'await set_style(style)'
+                ),
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'style': style}
+                    for style in styles
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {style["name"]}'
+                            for num, style in enumerate(styles, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.bot.l('style')))
+            )
 
-            if exact_cosmetic is None:
-                for item, prefix in self.bot.BACKEND_TO_ID_CONVERTER.items():
-                    if args[0].casefold().startswith(f'{prefix}_'.casefold()):
-                        if (message.user_type == 'owner'
-                                or (f'{prefix}_'.lower() in self.whitelist_commands
-                                    and message.user_type in ['owner', 'whitelist'])
-                                or f'{prefix}_'.lower() in self.user_commands):
-                            key = self.bot.convert_backend_to_key(item)
-                            attr = f'is_{key}_lock_for'
-                            if getattr(self, attr)(message.user_type):
-                                await message.reply(self.l('cosmetic_locked'))
-                                return
-                            asset_id = args[0].replace('/', '').replace('\\', '')
-                            await self.party.me.change_asset(item, asset_id)
-                            localized = self.localized_cosmetic(asset_id)
-                            display_name = localized.get('name', asset_id) if localized else asset_id
-                            display_type = (localized.get('type', {}).get('displayValue')
-                                            if localized and isinstance(localized.get('type'), dict)
-                                            else None) or self.bot.l(key)
-                            await message.reply(
-                                self.l('set_to', display_type, display_name)
-                            )
-                        else:
-                            await message.reply(self.l('missing_permission'))
-                            if not message.is_discord_message():
-                                functions = await self.get_permission_command_operation(user_id=message.author.id)
-                                for func in functions:
-                                    try:
-                                        if asyncio.iscoroutinefunction(func):
-                                            await func()
-                                        else:
-                                            func()
-                                    except Exception as e:
-                                        self.print_exception(e)
-                        return
+    @command(
+        name='add_style',
+        usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}]'
+    )
+    async def add_style(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 2:
+            await client.show_help(command, message)
+            return
 
-            if args[0].lower().startswith('playlist_'):
-                if (message.user_type == 'owner'
-                        or (f'playlist_' in self.whitelist_commands
-                            and message.user_type in ['owner', 'whitelist'])
-                        or f'playlist_' in self.user_commands):
-                    if not await self.ensure_party_leader():
-                        await message.reply(
-                            self.l('not_a_party_leader')
-                        )
-                        return
-                    try:
-                        await self.party.set_playlist(args[0])
-                    except rebootpy.Forbidden:
-                        await message.reply(
-                            self.l('not_a_party_leader')
-                        )
-                        return
-                    await message.reply(
-                        self.l(
-                            'set_to',
-                            self.bot.l('playlist'),
-                            args[0]
-                        )
-                    )
-                else:
-                    await message.reply(
-                        self.l('missing_permission')
-                    )
-                    if not message.is_discord_message():
-                        functions = await self.get_permission_command_operation(user_id=message.author.id)
-                        for func in functions:
-                            try:
-                                if asyncio.iscoroutinefunction(func):
-                                    await func()
-                                else:
-                                    func()
-                            except Exception as e:
-                                self.print_exception(e)
+        for k in ['outfit', 'backpack', 'pickaxe']:
+            if message.args[1] in client.commands[k]:
+                key = k
+                break
+        else:
+            await client.show_help(command, message)
+            return
+
+        item = client.bot.convert_to_backend_type(key)
+        asset = client.party.me.asset(item)
+        variants = client.party.me.variants(item)
+        enlightenment = client.party.me.enlightenments
+        styles = client.searcher.get_style(asset)
+
+        async def add_style(style):
+            attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+            if getattr(client, attr)(message.user_type):
+                await message.reply(
+                    client.l('cosmetic_locked')
+                )
                 return
+            await client.party.me.change_asset(
+                item,
+                asset,
+                variants=variants + style['variants'],
+                enlightenment=enlightenment,
+            )
 
-            if (message.user_type == 'owner'
-                    or ('item_search' in self.whitelist_commands
-                        and message.user_type in ['owner', 'whitelist'])
-                    or 'item_search' in self.user_commands):
-                async def set_cosmetic(cosmetic):
-                    item = cosmetic["type"]["backendValue"]
-                    attr = f'is_{self.bot.convert_backend_to_key(item)}_lock_for'
-                    if getattr(self, attr)(message.user_type):
-                        await message.reply(
-                            self.l('cosmetic_locked')
-                        )
-                        return
-                    await self.party.me.change_asset(item, cosmetic['id'])
-                    localized = self.localized_cosmetic(cosmetic['id']) or cosmetic
-                    await message.reply(
-                        self.l(
-                            'set_to',
-                            localized.get('type', {}).get('displayValue') or cosmetic['type']['displayValue'],
-                            self.name_cosmetic(localized)
-                        )
-                    )
+        if len(styles) == 0:
+            await message.reply(
+                client.l('no_style_change')
+            )
+        else:
+            client.select[message.author.id] = {
+                'exec': (
+                    'await add_style(style)'
+                ),
+                'globals': {**globals(), **locals()},
+                'variables': [
+                    {'style': style}
+                    for style in styles
+                ]
+            }
+            await message.reply(
+                ('\n'.join([f'{num}: {style["name"]}'
+                            for num, style in enumerate(styles, 1)])
+                    + '\n' + client.l('enter_number_to_select', client.bot.l('style')))
+            )
 
-                cosmetics = ([exact_cosmetic] if exact_cosmetic is not None
-                             else self.searcher.search_item_name_id(content))
+    @command(
+        name='set_variant',
+        usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}] [variant] [{client.l("number")}]'
+    )
+    async def set_variant(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 4:
+            await client.show_help(command, message)
+            return
 
-                if self.config['search_max'] and len(cosmetics) > self.config['search_max']:
-                    await message.reply(
-                        self.l('too_many', self.l('item'), len(cosmetics))
-                    )
-                    return
+        if not any([message.args[1] in client.commands[key]
+                    for key in ['outfit', 'backpack', 'pickaxe']]):
+            await client.show_help(command, message)
+            return
 
-                if len(cosmetics) == 0:
-                    return
+        for k in ['outfit', 'backpack', 'pickaxe']:
+            if message.args[1] in client.commands[k]:
+                key = k
+                break
+        else:
+            return
 
-                if len(cosmetics) == 1:
-                    await set_cosmetic(cosmetics[0])
-                else:
-                    self.select[message.author.id] = {
-                        'exec': 'await set_cosmetic(cosmetic)',
-                        'globals': {**globals(), **locals()},
-                        'variables': [
-                            {'cosmetic': cosmetic}
-                            for cosmetic in cosmetics
-                        ]
-                    }
-                    await message.reply(
-                        ('\n'.join([f"{num}. {self.name_cosmetic(cosmetic)} ({cosmetic['type']['displayValue']})"
-                                    for num, cosmetic in enumerate(cosmetics, 1)])
-                        + '\n' + self.l('enter_number_to_select', self.l('item')))
-                    )
+        variant_dict = {}
+        for num, text in enumerate(message.args[2:]):
+            if num % 2 != 0:
+                continue
+            try:
+                variant_dict[text] = message.args[num + 3]
+            except IndexError:
+                break
+        item = client.bot.convert_to_backend_type(key)
+        variants = client.party.me.create_variants(**variant_dict)
+        asset = client.party.me.asset(item)
+        enlightenment = client.party.me.enlightenments
+
+        attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+        if getattr(client, attr)(message.user_type):
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+            return
+        await client.party.me.change_asset(
+            item,
+            asset,
+            variants=variants,
+            enlightenment=enlightenment,
+        )
+
+    @command(
+        name='add_variant',
+        usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}] [variant] [{client.l("number")}]'
+    )
+    async def add_variant(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 4:
+            await client.show_help(command, message)
+            return
+
+        if not any([message.args[1] in client.commands[key]
+                    for key in ['outfit', 'backpack', 'pickaxe']]):
+            await client.show_help(command, message)
+            return
+
+        for k in ['outfit', 'backpack', 'pickaxe']:
+            if message.args[1] in client.commands[k]:
+                key = k
+                break
+        else:
+            return
+
+        variant_dict = {}
+        for num, text in enumerate(message.args[2:]):
+            if num % 2 != 0:
+                continue
+            try:
+                variant_dict[text] = message.args[num + 3]
+            except IndexError:
+                break
+        item = client.bot.convert_to_backend_type(key)
+        variants = client.party.me.variants(item)
+        variants += client.party.me.create_variants(**variant_dict)
+        asset = client.party.me.asset(item)
+        enlightenment = client.party.me.enlightenments
+
+        attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
+        if getattr(client, attr)(message.user_type):
+            await message.reply(
+                client.l('cosmetic_locked')
+            )
+            return
+        await client.party.me.change_asset(
+            item,
+            asset,
+            variants=variants,
+            enlightenment=enlightenment,
+        )
+
+    @command(
+        name='cosmetic_preset',
+        usage='{name} [{client.l("save_or_load", **self.variables_without_self)}] [{client.l("number")}]'
+    )
+    async def cosmetic_preset(command: Command, client: 'Client', message: MyMessage) -> None:
+        if len(message.args) < 3:
+            await client.show_help(command, message)
+            return
+
+        if not message.args[2].isdigit():
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        number = message.args[2]
+        if int(number) <= 0:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+
+        if message.args[1] in client.commands['save']:
+            if client.user.id not in client.bot.cosmetic_presets:
+                client.bot.cosmetic_presets[client.user.id] = {}
+            client.bot.cosmetic_presets[client.user.id][number] = {
+                'AthenaCharacter': {
+                    'asset': client.party.me.asset('AthenaCharacter'),
+                    'variants': client.party.me.variants('AthenaCharacter')
+                },
+                'AthenaBackpack': {
+                    'asset': client.party.me.asset('AthenaBackpack'),
+                    'variants': client.party.me.variants('AthenaBackpack')
+                },
+                'AthenaPickaxe': {
+                    'asset': client.party.me.asset('AthenaPickaxe'),
+                    'variants': client.party.me.variants('AthenaPickaxe')
+                },
+                'AthenaDance': {
+                    'asset': client.emote
+                },
+                'enlightenment': client.party.me.enlightenments
+            }
+            await client.bot.store_cosmetic_presets(client.user.id, client.bot.cosmetic_presets[client.user.id])
+            await message.reply(
+                client.l('cosmetic_preset_saved', number)
+            )
+        elif message.args[1] in client.commands['load']:
+            if client.bot.cosmetic_presets.get(client.user.id, {}).get(number) is None:
+                await message.reply(
+                    client.l('cosmetic_preset_not_found')
+                )
+                return
+            assets = client.bot.cosmetic_presets[client.user.id][number]
+            coros = []
+
+            items = [
+                'AthenaCharacter',
+                'AthenaBackpack',
+                'AthenaPickaxe',
+                'AthenaDance'
+            ]
+            for item in items:
+                conf = client.bot.convert_backend_type(item)
+                coro = client.party.me.change_asset(
+                    item,
+                    assets[item]['asset'],
+                    variants=assets[item].get('variants'),
+                    enlightenment=assets['enlightenment'],
+                    do_point=False
+                )
+                coro.__qualname__ = f'ClientPartyMember.set_{conf}'
+                coros.append(coro)
+            await client.party.me.edit(
+                *coros
+            )
+            await message.reply(
+                client.l('cosmetic_preset_loaded', number)
+            )
+        else:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
