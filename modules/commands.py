@@ -4249,7 +4249,7 @@ class DefaultCommands:
 
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
+        enlightenment = next(iter(client.party.me.enlightenments), None)
         styles = client.searcher.get_style(asset)
 
         async def set_style(style):
@@ -4307,7 +4307,7 @@ class DefaultCommands:
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
         variants = client.party.me.variants(item)
-        enlightenment = client.party.me.enlightenments
+        enlightenment = next(iter(client.party.me.enlightenments), None)
         styles = client.searcher.get_style(asset)
 
         async def add_style(style):
@@ -4377,7 +4377,7 @@ class DefaultCommands:
         item = client.bot.convert_to_backend_type(key)
         variants = client.party.me.create_variants(**variant_dict)
         asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
+        enlightenment = next(iter(client.party.me.enlightenments), None)
 
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
@@ -4425,7 +4425,7 @@ class DefaultCommands:
         variants = client.party.me.variants(item)
         variants += client.party.me.create_variants(**variant_dict)
         asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
+        enlightenment = next(iter(client.party.me.enlightenments), None)
 
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
@@ -4481,7 +4481,7 @@ class DefaultCommands:
                 'AthenaDance': {
                     'asset': client.emote
                 },
-                'enlightenment': client.party.me.enlightenments
+                'enlightenment': next(iter(client.party.me.enlightenments), None)
             }
             await client.bot.store_cosmetic_presets(client.user.id, client.bot.cosmetic_presets[client.user.id])
             await message.reply(

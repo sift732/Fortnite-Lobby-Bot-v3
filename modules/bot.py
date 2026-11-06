@@ -1912,7 +1912,7 @@ class Bot:
             f'{self.item_dir}/items_{lang}',
             items,
             force_file=True,
-            compact=True
+            compact=False
         )
 
     async def get_new_item_data(self, lang: str) -> list:
@@ -1947,7 +1947,7 @@ class Bot:
             f'{self.item_dir}/new_items_{lang}',
             {'api': self.config['api'], 'items': data},
             force_file=True,
-            compact=True
+            compact=False
         )
 
 
@@ -2000,7 +2000,7 @@ class Bot:
             f'{self.item_dir}/playlists_{lang}',
             playlists,
             force_file=True,
-            compact=True
+            compact=False
         )
 
 
@@ -2029,7 +2029,7 @@ class Bot:
             f'{self.item_dir}/banners',
             banners,
             force_file=True,
-            compact=True
+            compact=False
         )
 
     def get_banner_url(self, banner_id: str) -> Optional[str]:
@@ -2159,7 +2159,7 @@ class Bot:
                             path,
                             {'api': self.config['api'], 'items': {}},
                             force_file=True,
-                            compact=True
+                            compact=False
                         )
 
         # Playlists
@@ -2681,14 +2681,12 @@ class Bot:
                         MyClientPartyMember.set_battlepass_info,
                         has_purchased=True,
                         level=config['fortnite']['level']
-                    )
-                ]
-                member_meta.append(
+                    ),
                     partial(
                         MyClientPartyMember.set_victory_crowns,
-                        config['fortnite']['crowns']
+                        crowns=config['fortnite']['crowns']
                     )
-                )
+                ]
                 items = [
                     'AthenaCharacter',
                     'AthenaBackpack',

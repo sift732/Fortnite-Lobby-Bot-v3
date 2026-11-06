@@ -3820,6 +3820,20 @@ class Client(rebootpy.Client):
         content = message.content[prefix_length:]
         args = re.split(r'\s', content)
 
+        select = self.select.get(message.author.id)
+        if select is not None:
+            selection = message.content.strip()
+            if selection.isdigit():
+                num = int(selection) - 1
+                if not 0 <= num < len(select['variables']):
+                    await message.reply(self.l('please_enter_valid_number'))
+                    return
+                self.select.pop(message.author.id, None)
+                variables = {**select['globals'], **select['variables'][num]}
+                await self.bot.aexec(select['exec'], variables)
+                return
+            self.select.pop(message.author.id, None)
+
         async def replies():
             flag = False
             if self.replies['prefix_to_replies']:
@@ -3990,22 +4004,6 @@ class Client(rebootpy.Client):
                 execute_item_search = execute
             else:
                 execute_item_search = True
-        if execute_item_search:
-            select = self.select.get(message.author.id)
-            if select is not None:
-                if not content.isdigit():
-                    self.select.pop(message.author.id, None)
-                else:
-                    executed = True
-                    num = int(content) - 1
-                    if not 0 <= num < len(select['variables']):
-                        await message.reply(self.l('please_enter_valid_number'))
-                        return
-                    self.select.pop(message.author.id, None)
-                    variables = {**select['globals'], **select['variables'][num]}
-                    await self.bot.aexec(select['exec'], variables)
-                    return
-
         if self.replies['run_when'] == 'after_command':
             if await replies():
                 return
