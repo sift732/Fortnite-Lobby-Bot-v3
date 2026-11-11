@@ -19,7 +19,7 @@ from sanic import exceptions as exc
 from sanic import response as res
 from sanic.request import Request
 from sanic.response import HTTPResponse
-from websockets.exceptions import ConnectionClosedOK
+from websockets.exceptions import ConnectionClosed
 
 if version.parse(sanic.__version__) >= version.parse('21.9.0'):
     from sanic.server.websockets.connection import WebSocketConnection
@@ -685,215 +685,118 @@ async def boot_switch_restart(request: Request) -> HTTPResponse:
 
 
 def client_variables(client: 'Client', full: Optional[bool] = False) -> dict:
-    if full:
-        app = client.bot.web
-        user = getattr(client, 'user', None)
-        party = getattr(client, 'party', None)
-        return {
-            'name': (
-                f'{client.config["fortnite"]["nickname"] or user.display_name} / {user.id}'
-            ) if client.is_ready() else (
-                f'{client.config["fortnite"]["nickname"]} / {client.config.get("email") or client.config.get("id") or str(client.num)}'
-                if client.config['fortnite']['nickname'] else
-                client.config.get('email') or client.config.get('id') or str(client.num)
-            ),
-            'id': user.id if user is not None else None,
-            'is_ready': client.is_ready(),
-            'state': (
-                'ready'
-                if client.is_ready() else
-                'booting'
-                if client.is_booting() else
-                'closed'
-            ),
-            'num': client.num,
-            'friend_requests': [
-                {
-                    'name': client.name(pending, force_info=True),
-                    'id': pending.id,
-                    'type': 'outgoing' if pending.outgoing else 'incoming'
-                } for pending in client.pending_friends
-            ],
-            'join_requests': [
-                {
-                    'name': client.name(request.requester, force_info=True),
-                    'id': request.requester.id
-                } for request in client.join_requests.values()
-            ],
-            'friends': [
-                {
-                    'name': client.name(friend, force_info=True),
-                    'id': friend.id,
-                    'is_online': friend.is_online(),
-                    'is_joinable': (
-                        False
-                        if friend.last_presence is None or friend.last_presence.party is None else
-                        not friend.last_presence.party.private
-                    )
-                } for friend in client.friends
-            ],
-            'blocked_users': [
-                {
-                    'name': client.name(blocked, force_info=True),
-                    'id': blocked.id
-                } for blocked in client.blocked_users
-            ],
-            'party_data': {
-                'id': getattr(party, 'id', None),
-                'party_size': getattr(party, 'member_count', 0),
-                'party_max_size': getattr(party, 'config', {}).get('max_size', 0)
-            },
-            'party_members': [
-                {
-                    'name': client.name(member, force_info=True),
-                    'display_name': member.display_name,
-                    'id': member.id,
-                    'position': member.position,
-                    'is_leader': member.leader,
-                    'is_incoming_pending': client.is_incoming_pending(member.id),
-                    'is_outgoing_pending': client.is_outgoing_pending(member.id),
-                    'is_friend': client.has_friend(member.id),
-                    'is_blocked': client.is_blocked(member.id),
-                    'outfit': {
-                        'name': client.searcher.get_item(
-                            client.asset('AthenaCharacter', member),
-                            {}
-                        ).get('name', 'TBD'),
-                        'url': client.searcher.get_item(
-                            client.asset('AthenaCharacter', member),
-                            {}
-                        ).get('url') or app.url_for('static', filename='images/outfit.jpg')
-                    }
-                    if client.searcher.get_item(client.asset('AthenaCharacter', member)) is not None else
-                    None,
-                    'backpack': {
-                        'name': client.searcher.get_item(
-                            client.asset('AthenaBackpack', member),
-                            {}
-                        ).get('name', 'TBD'),
-                        'url': client.searcher.get_item(
-                            client.asset('AthenaBackpack', member),
-                            {}
-                        ).get('url') or app.url_for('static', filename='images/backpack.jpg')
-                    }
-                    if client.searcher.get_item(client.asset('AthenaBackpack', member)) is not None else
-                    None,
-                    'pickaxe': {
-                        'name': client.searcher.get_item(
-                            client.asset('AthenaPickaxe', member),
-                            {}
-                        ).get('name', 'TBD'),
-                        'url': client.searcher.get_item(
-                            client.asset('AthenaPickaxe', member),
-                            {}
-                        ).get('url') or app.url_for('static', filename='images/pickaxe.jpg')
-                    }
-                    if client.searcher.get_item(client.asset('AthenaPickaxe', member)) is not None else
-                    None,
-                    'emote': {
-                        'name': client.searcher.get_item(
-                            client.asset('AthenaDance', member),
-                            {}
-                        ).get('name', 'TBD'),
-                        'url': client.searcher.get_item(
-                            client.asset('AthenaDance', member),
-                            {}
-                        ).get('url') or app.url_for('static', filename='images/emote.jpg')
-                    }
-                    if client.searcher.get_item(client.asset('AthenaDance', member)) is not None else
-                    None,
-                    'banner': client.bot.get_banner_url(member.banner[0]),
-                    'level': member.banner[2]
-                } for member in getattr(party, 'members', [])
-            ],
-            'client_party_member': {
-                'name': client.name(party.me, force_info=True),
-                'id': party.me.id,
-                'position': party.me.position,
-                'is_leader': party.me.leader,
-                'is_incoming_pending': client.is_incoming_pending(party.me.id),
-                'is_outgoing_pending': client.is_outgoing_pending(party.me.id),
-                'is_friend': client.has_friend(party.me.id),
-                'is_blocked': client.is_blocked(party.me.id),
-                'outfit': {
-                    'name': client.searcher.get_item(
-                        client.asset('AthenaCharacter', party.me),
-                        {}
-                    ).get('name', 'TBD'),
-                    'url': client.searcher.get_item(
-                        client.asset('AthenaCharacter', party.me),
-                        {}
-                    ).get('url') or app.url_for('static', filename='images/outfit.jpg')
-                }
-                if client.searcher.get_item(client.asset('AthenaCharacter', party.me)) is not None else
-                None,
-                'backpack': {
-                    'name': client.searcher.get_item(
-                        client.asset('AthenaBackpack', party.me),
-                        {}
-                    ).get('name', 'TBD'),
-                    'url': client.searcher.get_item(
-                        client.asset('AthenaBackpack', party.me),
-                        {}
-                    ).get('url') or app.url_for('static', filename='images/backpack.jpg')
-                }
-                if client.searcher.get_item(client.asset('AthenaBackpack', party.me)) is not None else
-                None,
-                'pickaxe': {
-                    'name': client.searcher.get_item(
-                        client.asset('AthenaPickaxe', party.me),
-                        {}
-                    ).get('name', 'TBD'),
-                    'url': client.searcher.get_item(
-                        client.asset('AthenaPickaxe', party.me),
-                        {}
-                    ).get('url') or app.url_for('static', filename='images/pickaxe.jpg')
-                }
-                if client.searcher.get_item(client.asset('AthenaPickaxe', party.me)) is not None else
-                None,
-                'emote': {
-                    'name': client.searcher.get_item(
-                        client.asset('AthenaDance', party.me),
-                        {}
-                    ).get('name', 'TBD'),
-                    'url': client.searcher.get_item(
-                        client.asset('AthenaDance', party.me),
-                        {}
-                    ).get('url') or app.url_for('static', filename='images/emote.jpg')
-                }
-                if client.searcher.get_item(client.asset('AthenaDance', party.me)) is not None else
-                None,
-                'banner': client.bot.get_banner_url(party.me.banner[0]),
-                'level': party.me.banner[2]
-            } if party is not None else None,
-            'whisper': client.whisper,
-            'party_chat': (
-                client.party_chat['party_chat']
-                if client.party_chat['party_id'] == client.party_id else
-                []
-            )
-        }
+    user = getattr(client, 'user', None)
+    config = client.config
+    nickname = config.get('fortnite', {}).get('nickname')
+    fallback_name = config.get('email') or config.get('id') or str(client.num)
+    if client.is_ready() and user is not None:
+        name = f'{nickname or user.display_name} / {user.id}'
     else:
-        user = getattr(client, 'user', None)
+        name = f'{nickname} / {fallback_name}' if nickname else fallback_name
+
+    result = {
+        'name': name,
+        'id': getattr(user, 'id', None),
+        'is_ready': client.is_ready(),
+        'state': 'ready' if client.is_ready() else 'booting' if client.is_booting() else 'closed',
+        'num': client.num
+    }
+    if not full:
+        return result
+
+    app = client.bot.web
+    party = getattr(client, 'party', None)
+
+    def safe(key, func, fallback=None):
+        try:
+            return func()
+        except Exception as error:
+            marker = (key, type(error).__name__, str(error))
+            reported = getattr(client, '_viewer_reported_errors', None)
+            if reported is None:
+                reported = set()
+                client._viewer_reported_errors = reported
+            if marker not in reported:
+                reported.add(marker)
+                client.bot.debug_print_exception(error)
+            return fallback
+
+    def collect(key, iterable, transform):
+        values = safe(key, lambda: list(iterable()), [])
+        results = []
+        for value in values:
+            converted = safe(f'{key}:{getattr(value, "id", id(value))}', lambda value=value: transform(value))
+            if converted is not None:
+                results.append(converted)
+        return results
+
+    def cosmetic(member, asset_type, image_type):
+        asset = safe(f'{member.id}:{image_type}:asset', lambda: client.asset(asset_type, member))
+        if not asset:
+            return None
+        item = safe(f'{member.id}:{image_type}:item', lambda: client.searcher.get_item(asset))
+        if not isinstance(item, dict):
+            return None
         return {
-            'name': (
-                f'{client.config["fortnite"]["nickname"] or user.display_name} / {user.id}'
-            ) if client.is_ready() else (
-                f'{client.config["fortnite"]["nickname"]} / {client.config.get("email") or client.config.get("id") or str(client.num)}'
-                if client.config['fortnite']['nickname'] else
-                client.config.get('email') or client.config.get('id') or str(client.num)
-            ),
-            'id': user.id if user is not None else None,
-            'is_ready': client.is_ready(),
-            'state': (
-                'ready'
-                if client.is_ready() else
-                'booting'
-                if client.is_booting() else
-                'closed'
-            ),
-            'num': client.num
+            'name': item.get('name', 'TBD'),
+            'url': item.get('url') or app.url_for('static', filename=f'images/{image_type}.jpg')
         }
+
+    def party_member(member):
+        member_id = member.id
+        banner = safe(f'{member_id}:banner', lambda: member.banner, ()) or ()
+        return {
+            'name': safe(f'{member_id}:name', lambda: client.name(member, force_info=True), getattr(member, 'display_name', member_id)),
+            'display_name': getattr(member, 'display_name', member_id),
+            'id': member_id,
+            'position': getattr(member, 'position', 0),
+            'is_leader': getattr(member, 'leader', False),
+            'is_incoming_pending': safe(f'{member_id}:incoming', lambda: client.is_incoming_pending(member_id), False),
+            'is_outgoing_pending': safe(f'{member_id}:outgoing', lambda: client.is_outgoing_pending(member_id), False),
+            'is_friend': safe(f'{member_id}:friend', lambda: client.has_friend(member_id), False),
+            'is_blocked': safe(f'{member_id}:blocked', lambda: client.is_blocked(member_id), False),
+            'outfit': cosmetic(member, 'AthenaCharacter', 'outfit'),
+            'backpack': cosmetic(member, 'AthenaBackpack', 'backpack'),
+            'pickaxe': cosmetic(member, 'AthenaPickaxe', 'pickaxe'),
+            'emote': cosmetic(member, 'AthenaDance', 'emote'),
+            'banner': safe(f'{member_id}:banner_url', lambda: client.bot.get_banner_url(banner[0])) if len(banner) > 0 else None,
+            'level': safe(f'{member_id}:level', lambda: member.battlepass_info[1], 0)
+        }
+
+    result['friend_requests'] = collect('friend_requests', lambda: client.pending_friends, lambda pending: {
+        'name': client.name(pending, force_info=True),
+        'id': pending.id,
+        'type': 'outgoing' if pending.outgoing else 'incoming'
+    })
+    result['join_requests'] = collect('join_requests', lambda: client.join_requests.values(), lambda request: {
+        'name': client.name(request.friend, force_info=True),
+        'id': request.friend.id
+    })
+    result['friends'] = collect('friends', lambda: client.friends, lambda friend: {
+        'name': client.name(friend, force_info=True),
+        'id': friend.id,
+        'is_online': friend.is_online(),
+        'is_joinable': safe(f'{friend.id}:joinable', lambda: bool(friend.last_presence and friend.last_presence.party and not friend.last_presence.party.private), False)
+    })
+    result['blocked_users'] = collect('blocked_users', lambda: client.blocked_users, lambda blocked: {
+        'name': client.name(blocked, force_info=True),
+        'id': blocked.id
+    })
+
+    party_config = safe('party_config', lambda: getattr(party, 'config', {}) or {}, {})
+    result['party_data'] = {
+        'id': getattr(party, 'id', None),
+        'party_size': safe('party_size', lambda: party.member_count if party is not None else 0, 0),
+        'party_max_size': safe('party_max_size', lambda: party_config.get('max_size', 0), 0)
+    }
+    result['party_members'] = collect('party_members', lambda: party.members if party is not None else [], party_member)
+    me = safe('party_me', lambda: party.me if party is not None else None)
+    result['client_party_member'] = safe('client_party_member', lambda: party_member(me)) if me is not None else None
+    result['whisper'] = safe('whisper', lambda: client.whisper, {})
+    result['party_chat'] = safe('party_chat', lambda: (
+        client.party_chat['party_chat'] if party is not None and client.party_chat['party_id'] == client.party_id else []
+    ), [])
+    return result
 
 
 async def websocket_sender(request: Request, ws: WebSocketConnection,
@@ -955,152 +858,82 @@ async def clients_viewer(request: Request) -> HTTPResponse:
     return await app.render_template('clients-viewer.jinja')
 
 
+def client_viewer_variables(app, client: 'Client') -> dict:
+    var = client_variables(client, full=True)
+    incoming = sum(i['type'] == 'incoming' for i in var['friend_requests'])
+    online = sum(i['is_online'] for i in var['friends'])
+    var.update({
+        'incoming_friend_request': app.l('incoming_friend_request', incoming).get_text(),
+        'outgoing_friend_request': app.l('outgoing_friend_request', len(var['friend_requests']) - incoming).get_text(),
+        'join_request': app.l('join_request', len(var['join_requests'])).get_text(),
+        'friend': app.l('online', online, len(var['friends'])).get_text(),
+        'blocked_user': app.l('blocked_user', len(var['blocked_users'])).get_text(),
+        'party': app.l('party_name', var['party_data']['id']).get_text(),
+        'party_member': app.l('member', var['party_data']['party_size'], var['party_data']['party_max_size']).get_text()
+    })
+    return var
+
+
+def client_viewer_diff(before: dict, after: dict) -> dict:
+    keys = ('friend_requests', 'join_requests', 'friends', 'blocked_users', 'party_members')
+    result = {
+        'type': 'diff',
+        'added': {key: [item for item in after[key] if item not in before[key]] for key in keys},
+        'removed': {key: [item for item in before[key] if item not in after[key]] for key in keys}
+    }
+    for key in ('name', 'id', 'is_ready', 'state', 'num',
+                'incoming_friend_request', 'outgoing_friend_request', 'join_request',
+                'friend', 'blocked_user', 'party', 'party_member', 'party_data',
+                'client_party_member'):
+        result[key] = after[key]
+    return result
+
+
 async def websocket_sender_client(request: Request, ws: WebSocketConnection,
-                                  client: 'Client') -> None:
+                                  client: 'Client') -> asyncio.Task:
     app = request.app
+    send_lock = asyncio.Lock()
+    previous = client_viewer_variables(app, client)
 
-    def variables():
-        var = client_variables(client, full=True)
+    async def send(data: dict) -> None:
+        async with send_lock:
+            await ws.send(json.dumps(data))
 
-        incoming = len([i for i in var['friend_requests'] if i['type'] == 'incoming'])
-        online = len([i for i in var['friends'] if i['is_online']])
+    await send({'type': 'full', **previous})
 
-        var.update(
-            {
-                'incoming_friend_request': app.l(
-                    'incoming_friend_request',
-                    incoming
-                ).get_text(),
-                'outgoing_friend_request': app.l(
-                    'outgoing_friend_request',
-                    len(var['friend_requests']) - incoming
-                ).get_text(),
-                'join_request': app.l(
-                    'join_request',
-                    len(var['join_requests'])
-                ).get_text(),
-                'friend': app.l(
-                    'online',
-                    online,
-                    len(var['friends'])
-                ).get_text(),
-                'blocked_user': app.l(
-                    'blocked_user',
-                    len(var['blocked_users'])
-                ).get_text(),
-                'party': app.l(
-                    'party_name',
-                    var['party_data']['id']
-                ).get_text(),
-                'party_member': app.l(
-                    'member',
-                    var['party_data']['party_size'],
-                    var['party_data']['party_max_size']
-                ).get_text()
-            }
-        )
-        return var
+    async def store_whisper(to, data):
+        await send({'type': 'friend_message', 'to': to, **data})
 
-    def get_diff(before, after):
-        def get_added(key):
-            return [value for value in after[key] if value not in before[key]]
+    async def store_party_chat(data):
+        await send({'type': 'party_message', **data})
 
-        def get_removed(key):
-            return [value for value in before[key] if value not in after[key]]
+    async def clear_party_chat():
+        await send({'type': 'clear_party_message'})
 
-        final = {
-            'added': {},
-            'removed': {}
-        }
-        for key in ['friend_requests',
-                    'join_requests',
-                    'friends',
-                    'blocked_users',
-                    'party_members']:
-            final['added'][key] = get_added(key)
-            final['removed'][key] = get_removed(key)
-        for key in ['name',
-                    'id',
-                    'is_ready',
-                    'state',
-                    'num',
-                    'incoming_friend_request',
-                    'outgoing_friend_request',
-                    'join_request',
-                    'friend',
-                    'blocked_user',
-                    'party',
-                    'party_member',
-                    'party_data',
-                    'client_party_member']:
-            final[key] = after[key]
-        
-        return final
-
-    client.cached_var = variables()
-    client.cached_var['type'] = 'full'
-    try:
-        await ws.send(json.dumps(client.cached_var))
-    except ConnectionClosedOK:
-        return
+    handlers = (
+        ('store_whisper', store_whisper),
+        ('store_party_chat', store_party_chat),
+        ('clear_party_chat', clear_party_chat)
+    )
 
     async def sender():
-        async def store_whisper(to, data):
-            try:
-                data = {
-                    'type': 'friend_message',
-                    'to': to,
-                    **data
-                }
-                await ws.send(json.dumps(data))
-            except Exception as e:
-                client.remove_event_handler('store_whisper', store_whisper)
-                if e.__class__ is not ConnectionClosedOK:
-                    raise
+        nonlocal previous
+        for event, handler in handlers:
+            client.add_event_handler(event, handler)
+        try:
+            while True:
+                await asyncio.sleep(1)
+                current = client_viewer_variables(app, client)
+                if current != previous:
+                    await send(client_viewer_diff(previous, current))
+                    previous = current
+        except ConnectionClosed:
+            pass
+        finally:
+            for event, handler in handlers:
+                client.remove_event_handler(event, handler)
 
-        client.add_event_handler('store_whisper', store_whisper)
-
-        async def store_party_chat(data):
-            try:
-                data = {
-                    'type': 'party_message',
-                    **data
-                }
-                await ws.send(json.dumps(data))
-            except Exception as e:
-                client.remove_event_handler('store_party_chat', store_party_chat)
-                if e.__class__ is not ConnectionClosedOK:
-                    raise
-
-        client.add_event_handler('store_party_chat', store_party_chat)
-
-        async def clear_party_chat():
-            try:
-                data = {
-                    'type': 'clear_party_message'
-                }
-                await ws.send(json.dumps(data))
-            except Exception as e:
-                client.remove_event_handler('clear_party_chat', clear_party_chat)
-                if e.__class__ is not ConnectionClosedOK:
-                    raise
-
-        client.add_event_handler('clear_party_chat', clear_party_chat)
-
-        while True:
-            await asyncio.sleep(1)
-            new_var = variables()
-            if new_var != client.cached_var:
-                diff = get_diff(client.cached_var, new_var)
-                diff['type'] = 'diff'
-                client.cached_var = new_var
-                try:
-                    await ws.send(json.dumps(diff))
-                except ConnectionClosedOK:
-                    break
-
-    loop = app.ctx.loop
-    loop.create_task(sender())
+    return app.ctx.loop.create_task(sender())
 
 
 @bp.websocket('/clients-viewer/ws')
@@ -1136,181 +969,162 @@ async def clients_viewer_client(request: Request, num: str) -> HTTPResponse:
 @auth.login_required
 async def clients_viewer_client_ws(request: Request, ws: WebSocketConnection, num: str) -> None:
     app = request.app
-    num = int(num)
+    try:
+        num = int(num)
+    except ValueError:
+        exc.abort(404)
     client = app.ctx.bot.get_list_index(app.ctx.bot.clients, num)
     if client is None:
         exc.abort(404)
 
-    await websocket_sender_client(request, ws, client)
+    sender_task = await websocket_sender_client(request, ws, client)
+    actions = {
+        'accept_friend', 'add_friend', 'block_user',
+        'remove_or_decline_friend', 'unblock_user'
+    }
+    member_actions = {'member_promote': 'promote_member', 'member_kick': 'kick_member'}
+    wait_events = {
+        'friend_add', 'friend_request_decline', 'user_block',
+        'friend_request_abort', 'friend_remove', 'user_unblock',
+        'party_member_promote', 'party_member_kick'
+    }
 
-    def variables():
-        var = client_variables(client, full=True)
-        
-        incoming = len([i for i in var['friend_requests'] if i['type'] == 'incoming'])
-        online = len([i for i in var['friends'] if i['is_online']])
-
-        var.update(
-            {
-                'incoming_friend_request': app.l(
-                    'incoming_friend_request',
-                    incoming
-                ).get_text(),
-                'outgoing_friend_request': app.l(
-                    'outgoing_friend_request',
-                    len(var['friend_requests']) - incoming
-                ).get_text(),
-                'join_request': app.l(
-                    'join_request',
-                    len(var['join_requests'])
-                ).get_text(),
-                'friend': app.l(
-                    'online',
-                    online,
-                    len(var['friends'])
-                ).get_text(),
-                'blocked_user': app.l(
-                    'blocked_user',
-                    len(var['blocked_users'])
-                ).get_text(),
-                'party': app.l(
-                    'party_name',
-                    var['party_data']['id']
-                ).get_text(),
-                'party_member': app.l(
-                    'member',
-                    var['party_data']['party_size'],
-                    var['party_data']['party_max_size']
-                ).get_text()
-            }
-        )
-        return var
-
-    def get_diff(before, after):
-        def get_added(key):
-            return [value for value in after[key] if value not in before[key]]
-
-        def get_removed(key):
-            return [value for value in before[key] if value not in after[key]]
-
-        final = {
-            'added': {},
-            'removed': {}
-        }
-        for key in ['friend_requests',
-                    'join_requests',
-                    'friends',
-                    'blocked_users',
-                    'party_members']:
-            final['added'][key] = get_added(key)
-            final['removed'][key] = get_removed(key)
-        for key in ['name',
-                    'id',
-                    'is_ready',
-                    'state',
-                    'num',
-                    'incoming_friend_request',
-                    'outgoing_friend_request',
-                    'join_request',
-                    'friend',
-                    'blocked_user',
-                    'party',
-                    'party_member',
-                    'party_data',
-                    'client_party_member']:
-            final[key] = after[key]
-        
-        return final
-
-    while True:
-        data = json.loads(await ws.recv())
-        if data['event'] == 'leave_party':
+    try:
+        while True:
             try:
-                await client.party.me.leave()
-            except Exception as e:
-                client.bot.debug_print_exception(e)
-        elif data['event'] == 'friend_message':
-            friend = client.get_friend(data['user_id'])
-            if friend is None:
+                data = json.loads(await ws.recv())
+            except (ValueError, TypeError):
                 continue
-            try:
-                await friend.send(data['content'])
-            except Exception as e:
-                client.debug_print_exception(e)
+            if not isinstance(data, dict):
                 continue
-        elif data['event'] == 'party_message':
-            party = getattr(client, 'party')
-            if party is None:
+            event = data.get('event')
+            user_id = data.get('user_id')
+            if not isinstance(event, str):
                 continue
-            try:
-                await party.send(data['content'])
-            except Exception as e:
-                client.debug_print_exception(e)
-                continue
-        elif data['event'] == 'accept_join_request':
-            request = client.join_requests.get(data['user_id'])
-            if request is not None:
+            if event == 'leave_party':
+                party = getattr(client, 'party', None)
+                if party is None:
+                    continue
                 try:
-                    await request.accept()
+                    await party.me.leave()
                 except Exception as e:
                     client.bot.debug_print_exception(e)
-                else:
-                    if data['user_id'] in client.join_requests:
-                        client.join_requests.pop(data['user_id'])
-        elif data['event'] == 'decline_join_request':
-            if data['user_id'] in client.join_requests:
-                client.join_requests.pop(data['user_id'])
-        elif data['event'] == 'join_friend':
-            try:
-                await client.get_friend(data['user_id']).join_party()
-            except Exception as e:
-                client.bot.debug_print_exception(e)
-        elif data['event'] == 'command':
-            mes = DummyMessage(
-                client,
-                WebMessage(client, data['content'], request.cookies.get('X-SessionId'))
-            )
-            message = MyMessage(client, mes)
-            client.send(
-                message.content,
-                user_name=client.name(message.author),
-                add_p=[lambda x: f'{client.name(message.author)} | {x}', client.time]
-            )
-            await client.process_command(message, client.bot.config['web']['prefix'])
-            await ws.send(json.dumps({
-                'type': 'response',
-                'response': mes.result
-            }))
-        else:
-            if data['event'].startswith('member_'):
-                member = client.party.get_member(data['user_id'])
-                if member is None:
+            elif event == 'friend_message':
+                if not isinstance(user_id, str) or not isinstance(data.get('content'), str):
                     continue
-                func = lambda x: getattr(member, data['event'][len('member_'):])()
-            else:
-                func = getattr(client, data['event'])
-            client.cached_var = variables()
-            try:
-                await func(data['user_id'])
-            except Exception as e:
-                client.bot.debug_print_exception(e)
-            else:
+                friend = client.get_friend(user_id)
+                if friend is None:
+                    continue
                 try:
-                    await client.wait_for(data['wait_event'], timeout=5)
-                except asyncio.TimeoutError:
-                    if app.ctx.bot.config['loglevel'] == 'debug':
-                        app.ctx.bot.send(
-                            f"Event '{data['wait_event']}' timeout",
-                            color=yellow,
-                            add_d=app.ctx.bot.discord_error
-                        )
-                after_var = variables()
-                diff = get_diff(client.cached_var, after_var)
-                diff['type'] = 'diff'
-                client.cached_var = after_var
+                    await friend.send(data['content'])
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+            elif event == 'party_message':
+                party = getattr(client, 'party', None)
+                if party is None or not isinstance(data.get('content'), str):
+                    continue
                 try:
-                    await ws.send(json.dumps(diff))
-                except ConnectionClosedOK:
+                    await client.send_party_chat(data['content'])
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+            elif event == 'accept_join_request':
+                if not isinstance(user_id, str):
+                    continue
+                join_request = client.join_requests.get(user_id)
+                if join_request is not None:
+                    try:
+                        await join_request.accept()
+                    except Exception as e:
+                        client.bot.debug_print_exception(e)
+                    else:
+                        client.join_requests.pop(user_id, None)
+            elif event == 'decline_join_request':
+                if isinstance(user_id, str):
+                    client.join_requests.pop(user_id, None)
+            elif event == 'join_friend':
+                if not isinstance(user_id, str):
+                    continue
+                friend = client.get_friend(user_id)
+                if friend is None:
+                    continue
+                try:
+                    await friend.join_party()
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+            elif event == 'command':
+                if not isinstance(data.get('content'), str):
+                    continue
+                try:
+                    mes = DummyMessage(
+                        client,
+                        WebMessage(client, data['content'], request.cookies.get('X-SessionId'))
+                    )
+                    message = MyMessage(client, mes)
+                    client.send(
+                        message.content,
+                        user_name=client.name(message.author),
+                        add_p=[lambda x: f'{client.name(message.author)} | {x}', client.time]
+                    )
+                    await client.process_command(message, client.bot.config['web']['prefix'])
+                    await ws.send(json.dumps({'type': 'response', 'response': mes.result}))
+                except ConnectionClosed:
                     break
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+            elif event in actions or event in member_actions:
+                if not isinstance(user_id, str):
+                    continue
+                wait_event = data.get('wait_event')
+                if wait_event not in wait_events:
+                    continue
+                try:
+                    if event in member_actions:
+                        party = getattr(client, 'party', None)
+                        if party is None:
+                            continue
+                        member = party.get_member(user_id)
+                        if member is None:
+                            continue
+                        await getattr(client, member_actions[event])(member)
+                    elif event == 'accept_friend':
+                        pending = client.get_pending_friend(user_id)
+                        if pending is None or pending.outgoing:
+                            continue
+                        await client.accept_request(pending)
+                    elif event == 'add_friend':
+                        user = await client.fetch_user(user_id, cache=True)
+                        await client.send_friend_request(user)
+                    elif event == 'block_user':
+                        user = await client.fetch_user(user_id, cache=True)
+                        await client.user_block(user)
+                    elif event == 'remove_or_decline_friend':
+                        friend = client.get_friend(user_id)
+                        if friend is not None:
+                            await client.remove_friend(friend)
+                        else:
+                            pending = client.get_pending_friend(user_id)
+                            if pending is None:
+                                continue
+                            await client.decline_request(pending)
+                    elif event == 'unblock_user':
+                        blocked = client.get_blocked_user(user_id)
+                        if blocked is None:
+                            continue
+                        await client.user_unblock(blocked)
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+                    continue
+                try:
+                    await client.wait_for(wait_event, timeout=5)
+                except asyncio.TimeoutError:
+                    pass
+                except Exception as e:
+                    client.bot.debug_print_exception(e)
+    except ConnectionClosed:
+        pass
+    finally:
+        sender_task.cancel()
+        await asyncio.gather(sender_task, return_exceptions=True)
 
 
 class WebUser:

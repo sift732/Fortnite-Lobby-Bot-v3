@@ -2360,7 +2360,7 @@ class Client(rebootpy.Client):
                             var
                         )
                         if self.party.get_member(member.id) is not None:
-                            await self.party.send(text)
+                            await self.send_party_chat(text)
                         else:
                             friend = self.get_friend(member.id)
                             if friend is not None:
@@ -2391,7 +2391,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 if self.party.get_member(member.id) is not None:
-                    await self.party.send(text)
+                    await self.send_party_chat(text)
                 else:
                     friend = self.get_friend(member.id)
                     if friend is not None:
@@ -2436,7 +2436,7 @@ class Client(rebootpy.Client):
                         var
                     )
                     if self.party.get_member(member.id) is not None:
-                        await self.party.send(text)
+                        await self.send_party_chat(text)
                     else:
                         friend = self.get_friend(member.id)
                         if friend is not None:
@@ -2511,7 +2511,7 @@ class Client(rebootpy.Client):
                         )
                         if (self.party.get_member(message.author.id) is not None
                                 and isinstance(message, rebootpy.PartyMessage)):
-                            await self.party.send(text)
+                            await self.send_party_chat(text)
                         else:
                             friend = self.get_friend(message.author.id)
                             if friend is not None:
@@ -3056,7 +3056,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 try:
-                    await self.party.send(text)
+                    await self.send_party_chat(text)
                 except Exception as e:
                     self.print_exception(e)
             friend = self.get_friend(member.id)
@@ -3078,7 +3078,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 try:
-                    await self.party.send(text)
+                    await self.send_party_chat(text)
                     self.send(
                         self.l(
                             'random_message',
@@ -3678,6 +3678,11 @@ class Client(rebootpy.Client):
                 and after):
             await member.kick()
 
+
+    async def send_party_chat(self, content: str) -> None:
+        party = self.party
+        await party.send(content)
+        self.dispatch_event('party_message_send', party, content)
 
     async def event_party_message(self, message: rebootpy.PartyMessage) -> None:
         try:

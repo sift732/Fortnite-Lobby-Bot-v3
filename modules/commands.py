@@ -166,7 +166,9 @@ class MyMessage:
 
     async def reply(self, content: str) -> None:
         content = str(content)
-        if isinstance(self.message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None))))):
+        if isinstance(self.message, fortnitepy.PartyMessage):
+            await self.client.send_party_chat(content)
+        elif isinstance(self.message, fortnitepy.FriendMessage):
             await self.message.reply(content)
         elif isinstance(self.message, discord.Message):
             lines = content.split('\n')
@@ -3272,15 +3274,6 @@ class DefaultCommands:
 
             ret = await client.kick_member(member, message)
             if not isinstance(ret, Exception):
-                party = client.party
-                if message.is_party_message() and party is not None:
-                    remaining = [
-                        current
-                        for current in party.members
-                        if current.id not in (client.user.id, member.id)
-                    ]
-                    if not remaining:
-                        return
                 await message.reply(
                     client.l(
                         'kick',
@@ -4249,7 +4242,7 @@ class DefaultCommands:
 
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
-        enlightenment = next(iter(client.party.me.enlightenments), None)
+        enlightenment = client.party.me.enlightenments
         styles = client.searcher.get_style(asset)
 
         async def set_style(style):
@@ -4307,7 +4300,7 @@ class DefaultCommands:
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
         variants = client.party.me.variants(item)
-        enlightenment = next(iter(client.party.me.enlightenments), None)
+        enlightenment = client.party.me.enlightenments
         styles = client.searcher.get_style(asset)
 
         async def add_style(style):
@@ -4377,7 +4370,7 @@ class DefaultCommands:
         item = client.bot.convert_to_backend_type(key)
         variants = client.party.me.create_variants(**variant_dict)
         asset = client.party.me.asset(item)
-        enlightenment = next(iter(client.party.me.enlightenments), None)
+        enlightenment = client.party.me.enlightenments
 
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
@@ -4425,7 +4418,7 @@ class DefaultCommands:
         variants = client.party.me.variants(item)
         variants += client.party.me.create_variants(**variant_dict)
         asset = client.party.me.asset(item)
-        enlightenment = next(iter(client.party.me.enlightenments), None)
+        enlightenment = client.party.me.enlightenments
 
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
@@ -4481,7 +4474,7 @@ class DefaultCommands:
                 'AthenaDance': {
                     'asset': client.emote
                 },
-                'enlightenment': next(iter(client.party.me.enlightenments), None)
+                'enlightenment': client.party.me.enlightenments
             }
             await client.bot.store_cosmetic_presets(client.user.id, client.bot.cosmetic_presets[client.user.id])
             await message.reply(

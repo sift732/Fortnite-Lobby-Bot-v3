@@ -169,7 +169,7 @@ socket.addEventListener('open', function(ev) {
 })
 
 socket.addEventListener('close', function (ev) {
-    console.log('Websocket connection is closing');
+    console.log('Websocket connection is closing', {code: ev.code, reason: ev.reason, wasClean: ev.wasClean});
 })
 
 socket.addEventListener('message', function(ev) {
@@ -379,7 +379,7 @@ socket.addEventListener('message', function(ev) {
         div.setAttribute('user_id', member.id);
         div.setAttribute('position', member.position);
 
-        if (client.client_party_member.id != member.id){
+        if (client.client_party_member && client.client_party_member.id != member.id){
             const promote = document.createElement('input');
             promote.type = 'button';
             promote.classList.add('gray_button');
@@ -756,7 +756,6 @@ socket.addEventListener('message', function(ev) {
         });
 
         const join_request_content = join_request.firstElementChild.nextElementSibling;
-        join_request_content.innerHTML = '';
         client.removed.join_requests.forEach(request => {
             Array.from(join_request_content.children).forEach(child => {
                 if (child.getAttribute('user_id') == request.id) {
@@ -829,9 +828,12 @@ socket.addEventListener('message', function(ev) {
 
     if (client.type == 'full') {
         fullUpdate();
-        styleTag = document.createElement('style');
-        styleTag.innerHTML = '.content {display: none;}';
-        document.getElementsByTagName('head')[0].appendChild(styleTag);
+        if (!document.getElementById('client_viewer_style')) {
+            const styleTag = document.createElement('style');
+            styleTag.id = 'client_viewer_style';
+            styleTag.innerHTML = '.content {display: none;}';
+            document.getElementsByTagName('head')[0].appendChild(styleTag);
+        }
     } else if (client.type == 'diff') {
         diffUpdate();
     } else if (client.type == 'friend_message') {
@@ -858,7 +860,7 @@ socket.addEventListener('message', function(ev) {
     if (client.type == 'full' || client.type == 'diff') {
         const party_buttons = document.getElementsByClassName('party_button');
         Array.from(party_buttons).forEach(button => {
-            if (client.client_party_member.is_leader) {
+            if (client.client_party_member && client.client_party_member.is_leader) {
                 button.style.display = 'inline-block';
             } else {
                 button.style.display = 'none';
