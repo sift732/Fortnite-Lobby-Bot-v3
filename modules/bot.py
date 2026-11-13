@@ -2612,7 +2612,8 @@ class Bot:
                 if self.mode == 'glitch':
                     url = f'https://{os.getenv("PROJECT_DOMAIN")}.glitch.me'
                 elif self.mode == 'repl':
-                    url = f'https://{os.getenv("REPL_SLUG")}--{os.getenv("REPL_OWNER")}.repl.co'
+                    domain = os.getenv('REPLIT_DEV_DOMAIN') or (os.getenv('REPLIT_DOMAINS') or '').split(',')[0].strip()
+                    url = f'https://{domain}' if domain else f"http://{self.config['web']['ip']}:{self.config['web']['port']}"
                 else:
                     url = f"http://{self.config['web']['ip']}:{self.config['web']['port']}"
                 self.send(
