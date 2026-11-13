@@ -45,7 +45,7 @@ if (os.getenv('REPLIT_DB_URL') is not None
 else:
     db = None
 
-discord = importlib.import_module('discord')
+discord = importlib.import_module('nextcord')
 fortnitepy = importlib.import_module('fortnitepy')
 _ = importlib.import_module('pykakasi')
 kakasi = _.kakasi
@@ -1190,7 +1190,7 @@ class Bot:
                             final[f"[{repr(key)}][{num}][{n}]"] = v
                     else:
                         final[f"[{repr(key)}][{num}]"] = val
-                        
+
             else:
                 final[f"[{repr(key)}]"] = value
         return final
@@ -1260,7 +1260,7 @@ class Bot:
                             converter = '[value]'
                         else:
                             converter = '[int(value)]'
-                    
+
                 success = False
                 if converter is not None:
                     try:
