@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from .discord_client import DiscordClient
 
 discord = importlib.import_module('nextcord')
-fortnitepy = importlib.import_module('rebootpy')
+rebootpy = importlib.import_module('rebootpy')
 
 
 Clients = Union[
@@ -26,14 +26,14 @@ Clients = Union[
     'Client'
 ]
 Messages = Union[
-    fortnitepy.FriendMessage,
-    fortnitepy.PartyMessage,
+    rebootpy.FriendMessage,
+    rebootpy.PartyMessage,
     discord.Message
 ]
 Users = Union[
-    fortnitepy.User,
-    fortnitepy.Friend,
-    fortnitepy.PartyMember,
+    rebootpy.User,
+    rebootpy.Friend,
+    rebootpy.PartyMember,
     discord.User,
     discord.Member
 ]
@@ -143,13 +143,13 @@ class MyMessage:
         self.content = content or message.content
         self.content = self.content.strip('\r\n').strip('\r').strip('\n')
 
-        self.args = self.content.split()
+        self.args = re.split(r'\s', self.content)
         self.author = author or message.author
         self.user_type = (
             self.discord_client.get_user_type(message.author.id)
             if self.is_discord_message() else
             'owner'
-            if not isinstance(self.message, (discord.Message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None)))))) else
+            if not isinstance(self.message, (discord.Message, tuple(filter(None, (getattr(rebootpy, "FriendMessage", None), getattr(rebootpy, "PartyMessage", None)))))) else
             self.client.get_user_type(message.author.id)
         )
         self.created_at = message.created_at
@@ -159,14 +159,14 @@ class MyMessage:
         return isinstance(self.message, discord.Message)
 
     def is_friend_message(self) -> bool:
-        return isinstance(self.message, fortnitepy.FriendMessage)
+        return isinstance(self.message, rebootpy.FriendMessage)
 
     def is_party_message(self) -> bool:
-        return isinstance(self.message, fortnitepy.PartyMessage)
+        return isinstance(self.message, rebootpy.PartyMessage)
 
     async def reply(self, content: str) -> None:
         content = str(content)
-        if isinstance(self.message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None))))):
+        if isinstance(self.message, tuple(filter(None, (getattr(rebootpy, "FriendMessage", None), getattr(rebootpy, "PartyMessage", None))))):
             await self.message.reply(content)
         elif isinstance(self.message, discord.Message):
             lines = content.split('\n')
@@ -221,7 +221,7 @@ def command(name: Optional[str] = None,
     return deco
 
 
-async def add_to_list(attr: str, message: MyMessage, user: fortnitepy.User):
+async def add_to_list(attr: str, message: MyMessage, user: rebootpy.User):
     client = message.client
 
     if user.id in getattr(client, f'_{attr}'):
@@ -245,7 +245,7 @@ async def add_to_list(attr: str, message: MyMessage, user: fortnitepy.User):
     )
 
 
-async def remove_from_list(attr: str, message: MyMessage, user: fortnitepy.User):
+async def remove_from_list(attr: str, message: MyMessage, user: rebootpy.User):
     client = message.client
 
     if user.id not in getattr(client, f'_{attr}'):
@@ -531,7 +531,7 @@ async def playlist_search(mode: str, command: Command,
             return
         try:
             await client.party.set_playlist(playlist['id'])
-        except fortnitepy.Forbidden:
+        except rebootpy.Forbidden:
             await message.reply(
                 client.l('not_a_party_leader')
             )
@@ -2023,24 +2023,9 @@ class DefaultCommands:
             method=FindUserMatchMethod.CONTAINS,
             me=message.author
         )
-        search_name = ' '.join(message.args[1:]).strip()
-        exact_users = [
-            user for user in users
-            if user.display_name is not None
-            and user.display_name.casefold() == search_name.casefold()
-        ]
-        if exact_users:
-            users = exact_users
-        else:
-            try:
-                user = await client.fetch_user(search_name, cache=True)
-            except fortnitepy.HTTPException as e:
-                client.debug_print_exception(e)
-                if not users:
-                    raise
-            else:
-                if user is not None and user not in users:
-                    users.append(user)
+        user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
+        if user is not None and user not in users:
+            users.append(user)
 
         async def add_friend(user):
             if client.has_friend(user.id):
@@ -2857,7 +2842,7 @@ class DefaultCommands:
     )
     async def invite_list_users(command: Command, client: 'Client', message: MyMessage) -> None:
         users = [user for user in client.invitelist
-                 if isinstance(user, fortnitepy.Friend)]
+                 if isinstance(user, rebootpy.Friend)]
         if len(users) == 0:
             return
 
@@ -3099,7 +3084,7 @@ class DefaultCommands:
             if message.args[1] in client.commands[p]:
                 try:
                     await client.party.set_privacy(value)
-                except fortnitepy.Forbidden as e:
+                except rebootpy.Forbidden as e:
                     client.debug_print_exception(e)
                     await message.reply(
                         client.l('not_a_party_leader')
@@ -3145,7 +3130,7 @@ class DefaultCommands:
         if message.args[1] in client.commands['true']:
             try:
                 await client.party.enable_voice_chat()
-            except fortnitepy.Forbidden as e:
+            except rebootpy.Forbidden as e:
                 client.debug_print_exception(e)
                 await message.reply(
                     client.l('not_a_party_leader')
@@ -3161,7 +3146,7 @@ class DefaultCommands:
         elif message.args[1] in client.commands['false']:
             try:
                 await client.party.disable_voice_chat()
-            except fortnitepy.Forbidden as e:
+            except rebootpy.Forbidden as e:
                 client.debug_print_exception(e)
                 await message.reply(
                     client.l('not_a_party_leader')
@@ -3340,7 +3325,7 @@ class DefaultCommands:
             try:
                 await client.party.refresh_squad_assignments()
             except Exception as e:
-                if isinstance(e, fortnitepy.HTTPException):
+                if isinstance(e, rebootpy.HTTPException):
                     client.debug_print_exception(e)
                 else:
                     client.print_exception(e)
@@ -3445,7 +3430,7 @@ class DefaultCommands:
             try:
                 await client.party.refresh_squad_assignments()
             except Exception as e:
-                if isinstance(e, fortnitepy.HTTPException):
+                if isinstance(e, rebootpy.HTTPException):
                     client.debug_print_exception(e)
                 else:
                     client.print_exception(e)
@@ -3529,7 +3514,7 @@ class DefaultCommands:
         usage='{name}'
     )
     async def ready(command: Command, client: 'Client', message: MyMessage) -> None:
-        await client.party.me.set_ready(fortnitepy.ReadyState.READY)
+        await client.party.me.set_ready(rebootpy.ReadyState.READY)
         await message.reply(
             client.l(
                 'set_to',
@@ -3543,7 +3528,7 @@ class DefaultCommands:
         usage='{name}'
     )
     async def unready(command: Command, client: 'Client', message: MyMessage) -> None:
-        await client.party.me.set_ready(fortnitepy.ReadyState.NOT_READY)
+        await client.party.me.set_ready(rebootpy.ReadyState.NOT_READY)
         await message.reply(
             client.l(
                 'set_to',
@@ -3557,7 +3542,7 @@ class DefaultCommands:
         usage='{name}'
     )
     async def sitout(command: Command, client: 'Client', message: MyMessage) -> None:
-        await client.party.me.set_ready(fortnitepy.ReadyState.SITTING_OUT)
+        await client.party.me.set_ready(rebootpy.ReadyState.SITTING_OUT)
         await message.reply(
             client.l(
                 'set_to',
@@ -3739,7 +3724,7 @@ class DefaultCommands:
         async def shop_items():
             try:
                 shop = await client.fetch_item_shop()
-            except fortnitepy.HTTPException as e:
+            except rebootpy.HTTPException as e:
                 m = 'errors.com.epicgames.common.missing_action'
                 if e.message_code == m:
                     client.debug_print_exception(e)
@@ -3823,49 +3808,18 @@ class DefaultCommands:
             )
             return
 
-        if not client.is_outfit_lock_for(message.user_type):
-            await client.party.me.set_outfit(
-                enlightenment=(season, number)
+        if not client.is_emote_lock_for(message.user_type):
+            await client.party.me.change_asset(
+                'AthenaCharacter',
+                client.party.me.outfit,
+                variants=client.party.me.outfit_variants,
+                enlightenment=(season, number),
             )
             await message.reply(
                 client.l(
                     'set_to',
                     'enlightenment',
                     f'{season}, {number}'
-                )
-            )
-        else:
-            await message.reply(
-                client.l('cosmetic_locked')
-            )
-
-    @command(
-        name='corruption',
-        usage='{name} [{client.l("number")}]'
-    )
-    async def corruption(command: Command, client: 'Client', message: MyMessage) -> None:
-        if len(message.args) < 2:
-            await client.show_help(command, message)
-            return
-
-        try:
-            number = int(message.args[1])
-        except ValueError as e:
-            client.debug_print_exception(e)
-            await message.reply(
-                client.l('please_enter_valid_number')
-            )
-            return
-
-        if not client.is_outfit_lock_for(message.user_type):
-            await client.party.me.set_outfit(
-                corruption=number
-            )
-            await message.reply(
-                client.l(
-                    'set_to',
-                    'corruption',
-                    number
                 )
             )
         else:
@@ -4162,36 +4116,51 @@ class DefaultCommands:
         usage='{name} [{client.l("number")}]'
     )
     async def crowns(command: Command, client: 'Client', message: MyMessage) -> None:
-        if len(message.args) < 2:
-            await client.show_help(command, message)
-            return
 
         try:
             crowns_count = int(message.args[1])
-        except ValueError as e:
-            client.debug_print_exception(e)
-            await message.reply(
-                client.l('please_enter_valid_number')
-            )
+        except ValueError:
+            await client.show_help(command, message)
             return
 
-        if crowns_count < 0:
-            await message.reply(
-                client.l('please_enter_valid_number')
-            )
-            return
+        meta = client.party.me.meta
+        data = (meta.get_prop('Default:AthenaCosmeticLoadout_j'))['AthenaCosmeticLoadout']
+        try:
+            data['cosmeticStats'][1]['statValue'] = crowns_count
+        except KeyError:
+            data['cosmeticStats'] = [
+                {
+                    "statName": "TotalVictoryCrowns",
+                    "statValue": 0
+                },
+                {
+                    "statName": "TotalRoyalRoyales",
+                    "statValue": crowns_count
+                },
+                {
+                    "statName": "HasCrown",
+                    "statValue": 0
+                }
+            ]
+        final = {'AthenaCosmeticLoadout': data}
+        key = 'Default:AthenaCosmeticLoadout_j'
+        prop = {key: meta.set_prop(key, final)}
 
-        await client.party.me.set_victory_crowns(crowns_count)
-        client.config['fortnite']['crowns'] = crowns_count
-        client.bot.save_json('config', client.bot.config)
+        await client.party.me.patch(updated=prop)
+
         await client.party.me.clear_emote()
-        await client.party.me.set_emote('EID_Coronet')
+
+        await client.party.me.change_asset(
+            'AthenaDance',
+            'EID_Coronet',
+            keep=False
+        )
 
         await message.reply(
             client.l(
                 'set_to',
                 client.bot.l('crowns'),
-                crowns_count
+                message.args[1]
             )
         )
 
@@ -4216,7 +4185,7 @@ class DefaultCommands:
 
         try:
             await client.party.patch(updated=prop)
-        except fortnitepy.Forbidden:
+        except rebootpy.Forbidden:
             await message.reply(
                 client.l('not_a_party_leader')
             )
