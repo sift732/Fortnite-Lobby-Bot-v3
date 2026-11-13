@@ -143,7 +143,7 @@ class MyMessage:
         self.content = content or message.content
         self.content = self.content.strip('\r\n').strip('\r').strip('\n')
 
-        self.args = re.split(r'\s', self.content)
+        self.args = self.content.split()
         self.author = author or message.author
         self.user_type = (
             self.discord_client.get_user_type(message.author.id)
@@ -166,9 +166,7 @@ class MyMessage:
 
     async def reply(self, content: str) -> None:
         content = str(content)
-        if isinstance(self.message, fortnitepy.PartyMessage):
-            await self.client.send_party_chat(content)
-        elif isinstance(self.message, fortnitepy.FriendMessage):
+        if isinstance(self.message, tuple(filter(None, (getattr(fortnitepy, "FriendMessage", None), getattr(fortnitepy, "PartyMessage", None))))):
             await self.message.reply(content)
         elif isinstance(self.message, discord.Message):
             lines = content.split('\n')
@@ -2025,9 +2023,24 @@ class DefaultCommands:
             method=FindUserMatchMethod.CONTAINS,
             me=message.author
         )
-        user = await client.fetch_user(' '.join(message.args[1:]), cache=True)
-        if user is not None and user not in users:
-            users.append(user)
+        search_name = ' '.join(message.args[1:]).strip()
+        exact_users = [
+            user for user in users
+            if user.display_name is not None
+            and user.display_name.casefold() == search_name.casefold()
+        ]
+        if exact_users:
+            users = exact_users
+        else:
+            try:
+                user = await client.fetch_user(search_name, cache=True)
+            except fortnitepy.HTTPException as e:
+                client.debug_print_exception(e)
+                if not users:
+                    raise
+            else:
+                if user is not None and user not in users:
+                    users.append(user)
 
         async def add_friend(user):
             if client.has_friend(user.id):

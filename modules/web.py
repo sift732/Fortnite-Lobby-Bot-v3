@@ -1017,6 +1017,15 @@ async def clients_viewer_client_ws(request: Request, ws: WebSocketConnection, nu
                     continue
                 try:
                     await friend.send(data['content'])
+                    client.dispatch_event('friend_message_send', friend, data['content'])
+                    client.send(
+                        data['content'],
+                        user_name=client.name(friend),
+                        add_p=[
+                            lambda text: f'{client.name(friend)} | {text}',
+                            client.time
+                        ]
+                    )
                 except Exception as e:
                     client.bot.debug_print_exception(e)
             elif event == 'party_message':

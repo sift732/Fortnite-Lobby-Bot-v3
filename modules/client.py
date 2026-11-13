@@ -656,8 +656,21 @@ class Client(rebootpy.Client):
                     except AttributeError:
                         pass
 
-            task = self.http.account_graphql_get_by_display_name(elem)
-            tasks.append(task)
+            
+            async def lookup_user(display_name):
+                try:
+                    return await self.http.account_graphql_get_by_display_name(display_name)
+                except rebootpy.HTTPException:
+                    user = await super(type(self), self).fetch_user_by_display_name(
+                        display_name,
+                        cache=False,
+                        raw=True
+                    )
+                    if user is None:
+                        return {'account': []}
+                    return {'account': [user]}
+
+            tasks.append(lookup_user(dn))
 
         for elem in users:
             if self.is_display_name(elem):

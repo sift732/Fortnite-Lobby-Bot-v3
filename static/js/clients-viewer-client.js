@@ -1,3 +1,15 @@
+document.addEventListener('DOMContentLoaded', function () {
+    const commandInput = document.querySelector('[onkeydown*="commandKeyPress"]');
+
+    if (commandInput) {
+        const submit = commandInput.nextElementSibling;
+
+        if (submit) {
+            getCommandHistory(submit);
+        }
+    }
+});
+
 const openables = document.getElementsByClassName('openable');
 Array.from(openables).forEach(openable => {
     openable.firstElementChild.onclick = function () {
@@ -141,19 +153,208 @@ function partyChatKeyPress(key, element) {
     }
 }
 
+const COMMAND_HISTORY_KEY = `fnb_command_history_${location.pathname}`;
+let commandHistory = null;
+let commandHistoryEntries = loadCommandHistoryEntries();
+let pendingCommandIds = [];
+
+function loadCommandHistoryEntries() {
+    try {
+        const entries = JSON.parse(localStorage.getItem(COMMAND_HISTORY_KEY) || '[]');
+        if (!Array.isArray(entries)) return [];
+        if (entries.every(entry => entry && Array.isArray(entry.responses))) return entries;
+        const groups = [];
+        entries.forEach(entry => {
+            if (!entry || typeof entry.message !== 'string') return;
+            if (entry.message.startsWith('WebUser | ') || entry.message.startsWith('> ')) {
+                groups.push({
+                    id: crypto.randomUUID(),
+                    command: {...entry, message: entry.message.replace(/^> /, 'WebUser | ')},
+                    responses: []
+                });
+            } else if (groups.length) {
+                groups[groups.length - 1].responses.push(entry);
+            }
+        });
+        return groups;
+    } catch {
+        return [];
+    }
+}
+
+function saveCommandHistory() {
+    try {
+        localStorage.setItem(COMMAND_HISTORY_KEY, JSON.stringify(commandHistoryEntries));
+    } catch (error) {
+        console.error('Command history save failed:', error);
+    }
+}
+
+function createCommandHistoryLine(entry) {
+    const line = document.createElement('div');
+    line.style.marginBottom = '4px';
+
+    const prefix = document.createElement('span');
+    prefix.textContent = `[${entry.time}] [${entry.bot}] `;
+    prefix.style.color = '#AAAAAA';
+
+    const content = document.createElement('span');
+    content.textContent = entry.message;
+    content.style.color = entry.color;
+
+    line.append(prefix, content);
+    return line;
+}
+
+function createCommandHistoryGroup(group) {
+    const element = document.createElement('div');
+    element.className = 'command-history-group';
+    element.dataset.commandId = group.id;
+    element.style.marginBottom = '12px';
+    element.appendChild(createCommandHistoryLine(group.command));
+    group.responses.forEach(entry => element.appendChild(createCommandHistoryLine(entry)));
+    return element;
+}
+
+function restoreCommandHistory() {
+    if (!commandHistory) return;
+    commandHistory.replaceChildren();
+    commandHistoryEntries.slice().reverse().forEach(group => {
+        commandHistory.appendChild(createCommandHistoryGroup(group));
+    });
+    commandHistory.scrollTop = 0;
+}
+
+function getCommandHistory(element) {
+    if (commandHistory && commandHistory.isConnected) return commandHistory;
+
+    const input = element.previousElementSibling;
+    const container = input.parentElement;
+    const wrapper = document.createElement('div');
+    wrapper.id = 'command-history-wrapper';
+    Object.assign(wrapper.style, {
+        marginTop: '10px',
+        padding: '12px',
+        backgroundColor: 'rgba(0, 0, 0, 0.15)',
+        borderRadius: '6px'
+    });
+
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+        display: 'flex',
+        justifyContent: 'flex-end',
+        marginBottom: '8px'
+    });
+
+    const clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.classList.add('gray_button');
+    clearButton.textContent = texts.clear ?? 'Clear';
+    clearButton.onclick = function () {
+        commandHistoryEntries = [];
+        pendingCommandIds = [];
+        localStorage.removeItem(COMMAND_HISTORY_KEY);
+        commandHistory.replaceChildren();
+    };
+    header.appendChild(clearButton);
+    wrapper.appendChild(header);
+
+    commandHistory = document.createElement('div');
+    commandHistory.id = 'command-history';
+    Object.assign(commandHistory.style, {
+        maxHeight: '300px',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere',
+        fontSize: '14px',
+        fontFamily: 'monospace'
+    });
+    wrapper.appendChild(commandHistory);
+    container.insertAdjacentElement('afterend', wrapper);
+    restoreCommandHistory();
+    return commandHistory;
+}
+
+function appendCommandHistory(message, color) {
+    if (!message) return;
+    const entry = {
+        time: new Date().toLocaleTimeString('ja-JP', {hour12: false}),
+        bot: document.getElementById('name')?.textContent?.trim() || 'Bot',
+        message: String(message).trim(),
+        color: color
+    };
+
+    if (entry.message.startsWith('WebUser | ')) {
+        const group = {id: crypto.randomUUID(), command: entry, responses: []};
+        commandHistoryEntries.push(group);
+        pendingCommandIds.push(group.id);
+        if (commandHistory?.isConnected) {
+            commandHistory.prepend(createCommandHistoryGroup(group));
+            commandHistory.scrollTop = 0;
+        }
+    } else {
+        const id = pendingCommandIds.shift();
+        const group = commandHistoryEntries.find(item => item.id === id);
+        if (!group) return;
+        group.responses.push(entry);
+        const element = Array.from(commandHistory?.children || []).find(item => item.dataset.commandId === id);
+        if (element) element.appendChild(createCommandHistoryLine(entry));
+    }
+    saveCommandHistory();
+}
+
 function sendCommand(element) {
     const input = element.previousElementSibling;
+    const content = input.value.trim();
+
+    if (!content) {
+        const res = document.getElementById('res');
+        res.style.color = '#F04747';
+        res.style.transform = 'translateX(-50%) translateY(0%)';
+        res.innerText = texts.message_null;
+
+        const shake = document.getElementById('shake');
+        shake.style.animation = 'shake 400ms';
+
+        res.ontransitionend = function () {
+            setTimeout(function () {
+                res.style.transform = 'translateX(-50%) translateY(-200px)';
+            }, 1500);
+        };
+
+        setTimeout(function () {
+            shake.style.animation = '';
+        }, 400);
+
+        return false;
+    }
+
+    if (socket.readyState !== WebSocket.OPEN) {
+        return false;
+    }
+
+    getCommandHistory(element);
+
     socket.send(JSON.stringify({
         event: 'command',
         content: input.value
     }));
-    setTimeout(function () {
-        element.previousElementSibling.value = '';
-    }, 0.01)
+
+    appendCommandHistory('WebUser | ' + content, '#FFFFFF');
+
+    input.value = '';
 }
 
+
 function commandKeyPress(event, element) {
-    if (event.key == 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+
+        if (event.repeat) {
+            return;
+        }
+
         sendCommand(element);
     }
 }
@@ -849,13 +1050,20 @@ socket.addEventListener('message', function(ev) {
                 break;
             }
         }
+    
     } else if (client.type == 'response') {
-        const res = document.getElementById('res');
-        res.innerHTML = '';
-        const pre = document.createElement('pre');
-        pre.innerText = client.response;
-        res.appendChild(pre);
+        const response = String(client.response ?? '').trim();
+
+        if (response) {
+            const isError = /エラー|error|exception|失敗/i.test(response);
+
+            appendCommandHistory(
+                response,
+                isError ? '#F04747' : '#43B581'
+            );
+        }
     }
+
 
     if (client.type == 'full' || client.type == 'diff') {
         const party_buttons = document.getElementsByClassName('party_button');
