@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "fortnite-lobbybot-v3"
+version = "3.0.0"
+description = "Fortnite-LobbyBot-v3 by RS"
+authors = ["RS"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.14,<4.0"
+aiohttp = "*"
+aiofiles = "*"
+aioconsole = "*"
+colorama = "*"
+jaconv = "*"
+pykakasi = "*"
+nextcord = "*"
+sanic = "*"
+Jinja2 = "*"
+websockets = "*"
+packaging = "*"
+tzlocal = "*"
+rebootpy = { git = "https://github.com/sorbatti/rebootpy.git", rev = "1e7163bfdc6265b627867844ff2d3a7aa37ce728" }
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
