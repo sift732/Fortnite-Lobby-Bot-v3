@@ -95,17 +95,14 @@ class Updater:
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
 
-            'commands.json': ['diff', 'db', 'backup'],
-            'config.json': ['diff', 'db', 'backup'],
-            'custom_commands.json': ['diff', 'db', 'backup'],
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
             'README_EN.md': [],
             'README_ES.md': [],
-            'replies.json': ['diff', 'db', 'backup'],
             'requirements.txt': []
         }
+        self.personal_settings = ('commands', 'config', 'custom_commands', 'replies')
         self.pc_updates = {
             'INSTALL.bat': [],
             'RUN.bat': []
@@ -235,7 +232,7 @@ class Updater:
                     ),
                     add_p=self.bot.time
                 )
-                raise RuntimeError(f"File not found: {path}")
+                return False, None
             if res.status != 200:
                 retry_after = 10
                 res.release()
@@ -343,6 +340,7 @@ class Updater:
 
         try:
             await self.recover_old_files(uri)
+            await self.sync_personal_settings(uri)
             async with self.bot.http.session.get(f'{uri}version.json') as res:
                 if res.status != 200:
                     raise RuntimeError(f'HTTP {res.status}: version.json')
@@ -376,6 +374,67 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
+
+    def merge_settings(self, existing: dict, defaults: dict) -> dict:
+        if not isinstance(existing, dict) or not isinstance(defaults, dict):
+            raise TypeError('Settings root must be an object')
+        merged = existing.copy()
+        for key, value in defaults.items():
+            if key not in merged:
+                merged[key] = value
+            elif isinstance(value, dict) and isinstance(merged[key], dict):
+                merged[key] = self.merge_settings(merged[key], value)
+        return merged
+
+    async def sync_personal_settings(self, uri: str) -> None:
+        for key in self.personal_settings:
+            path = f'{key}.json'
+            old_path = f'{key}_old.json'
+            if self.bot.mode == 'repl' and self.bot.isfile(key):
+                existing = self.bot.load_json(key)
+                source = 'db'
+            elif os.path.isfile(path):
+                with open(path, encoding='utf-8-sig') as f:
+                    existing = json.load(f)
+                source = 'file'
+            elif os.path.isfile(old_path):
+                with open(old_path, encoding='utf-8-sig') as f:
+                    existing = json.load(f)
+                source = 'old'
+            else:
+                continue
+
+            async with self.bot.http.session.get(uri + path) as res:
+                if res.status == 404:
+                    continue
+                if res.status != 200:
+                    raise RuntimeError(f'HTTP {res.status}: {path}')
+                defaults = await res.json(content_type=None)
+            merged = self.merge_settings(existing, defaults)
+            if source == 'db':
+                if merged != existing:
+                    self.bot.save_json(key, merged)
+            elif source == 'file':
+                if merged != existing:
+                    temporary = f'{path}.settings_tmp'
+                    try:
+                        async with aopen(temporary, 'w', encoding='utf-8') as f:
+                            await f.write(json.dumps(merged, ensure_ascii=False, indent=4))
+                        await areplace(temporary, path)
+                    finally:
+                        if os.path.isfile(temporary):
+                            os.remove(temporary)
+            else:
+                temporary = f'{path}.settings_tmp'
+                try:
+                    async with aopen(temporary, 'w', encoding='utf-8') as f:
+                        await f.write(json.dumps(merged, ensure_ascii=False, indent=4))
+                    await areplace(temporary, path)
+                finally:
+                    if os.path.isfile(temporary):
+                        os.remove(temporary)
+            if os.path.isfile(path) and os.path.isfile(old_path):
+                os.remove(old_path)
 
     async def recover_old_files(self, uri: str) -> None:
         paths = list(self.updates)
