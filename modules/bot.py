@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 import asyncio
 import datetime
 import importlib
+import uuid
 import io
 import json
 import logging
@@ -143,10 +143,7 @@ class Bot:
         self.use_device_auth = use_device_auth
         self.use_authorization_code = use_authorization_code
 
-        if sys.version_info >= (3, 10):
-            self.input_lock = asyncio.Lock()
-        else:
-            self.input_lock = asyncio.Lock(loop=loop)
+        self.input_lock = asyncio.Lock()
         self.clients = []
         self.updater = Updater(self)
         self.web = Web(self, 'modules_bot')
@@ -157,9 +154,6 @@ class Bot:
         os.makedirs(self.item_dir, exist_ok=True)
 
         self.booted_at = None
-        self.email_pattern = re.compile(
-            r'[a-zA-Z0-9.+-_]+@[a-zA-Z0-9-_]+\.[a-zA-Z0-9]+'
-        )
         self.return_pattern = re.compile(
             r'(?P<space>\s*)(return|return\s+(?P<text>.*))\s*'
         )
@@ -257,7 +251,7 @@ class Bot:
                 'real_value': i,
                 'value': i,
                 'display_value': i
-            } for i in ['BenBot', 'Fortnite-API', 'FortniteApi.io']
+            } for i in ['Fortnite-API', 'FortniteApi.io']
         ]
         self.select_loglevel = [
             {
@@ -286,7 +280,7 @@ class Bot:
                 'real_value': i,
                 'value': i,
                 'display_value': self.l(f'multiple_select_operation_{i}', default=i)
-            } for i in ['kick', 'chatban', 'remove', 'block', 'blacklist']
+            } for i in ['kick', 'remove', 'block', 'blacklist']
         ]
         self.multiple_select_platform = self.select_platform
 
@@ -327,7 +321,6 @@ class Bot:
             "['discord_log']": [str, 'can_be_none'],
             "['omit_over2000']": [bool, 'select_bool'],
             "['skip_if_overflow']": [bool, 'select_bool'],
-            "['hide_email']": [bool, 'select_bool'],
             "['hide_password']": [bool, 'select_bool'],
             "['hide_token']": [bool, 'select_bool'],
             "['hide_webhook']": [bool, 'select_bool'],
@@ -338,7 +331,6 @@ class Bot:
         }
         self.client_config_tags = {
             "['fortnite']": [dict],
-            "['fortnite']['email']": [str, 'lambda x: x and self.email_pattern.match(x) is not None'],
             "['fortnite']['nickname']": [str, 'can_be_none'],
             "['fortnite']['owner']": [list, str, 'can_be_none'],
             "['fortnite']['outfit']": [str, 'can_be_none'],
@@ -406,12 +398,8 @@ class Bot:
             "['fortnite']['party']['max_size']": [int, 'lambda x: 1 <= x <= 16'],
             "['fortnite']['party']['allow_swap']": [bool, 'select_bool'],
             "['fortnite']['party']['playlist']": [str],
-            "['fortnite']['party']['disable_voice_chat']": [bool, 'select_bool'],
-            "['fortnite']['avatar_id']": [str, 'can_be_none'],
-            "['fortnite']['avatar_color']": [str, 'can_be_multiple', 'can_be_none'],  # noqa
-            "['fortnite']['banner_id']": [str],
-            "['fortnite']['banner_color']": [str],
             "['fortnite']['level']": [int],
+            "['fortnite']['crowns']": [int],
             "['fortnite']['tier']": [int],
             "['fortnite']['platform']": [str, 'select_platform'],
             "['fortnite']['ng_platforms']": [list, str, 'multiple_select_platform', 'can_be_none'],
@@ -524,7 +512,6 @@ class Bot:
                 "['bot']": tags2,
                 "['null']": tags2,
                 "['operation_kick']": tags2,
-                "['operation_chatban']": tags2,
                 "['operation_remove']": tags2,
                 "['operation_block']": tags2,
                 "['operation_blacklist']": tags2,
@@ -624,27 +611,65 @@ class Bot:
             or self.error_replies
         )
 
-    def get_device_auth_details(self) -> dict:
-        if self.isfile('device_auths'):
-            return self.load_json('device_auths')
-        else:
-            return {}
+    def get_device_auth_details(self) -> list:
+        if not self.isfile('device_auths'):
+            return []
+        data = self.load_json('device_auths')
+        if isinstance(data, dict):
+            data = [dict(value, uuid=key) for key, value in data.items()
+                    if isinstance(value, dict)]
+        if not isinstance(data, list):
+            return []
+        result = []
+        for entry in data:
+            if not isinstance(entry, dict):
+                continue
+            uuid_value = entry.get('uuid') or entry.get('id')
+            if not uuid_value:
+                continue
+            result.append({
+                'uuid': uuid_value,
+                'account_id': entry.get('account_id') or entry.get('accountId'),
+                'device_id': entry.get('device_id') or entry.get('deviceId'),
+                'secret': entry.get('secret'),
+                'display_name': entry.get('display_name') or entry.get('displayName')
+            })
+        return result
 
-    def store_device_auth_details(self, email: str, details: dict) -> None:
+    def store_device_auth_details(self, client_id: str, details: dict) -> None:
+        if not isinstance(details, dict) or not client_id:
+            return
+        account_id = details.get('account_id') or details.get('accountId')
+        device_id = details.get('device_id') or details.get('deviceId')
+        secret = details.get('secret')
+        if not all((account_id, device_id, secret)):
+            return
         existing = self.get_device_auth_details()
-        existing[email.lower()] = details
+        for entry in existing:
+            if entry['uuid'] != client_id and entry.get('account_id') == account_id:
+                raise ValueError('Duplicate Epic Account ID')
+        previous = next((entry for entry in existing if entry['uuid'] == client_id), None)
+        updated = {
+            'uuid': client_id,
+            'account_id': account_id,
+            'device_id': device_id,
+            'secret': secret,
+            'display_name': details.get('display_name') or (previous or {}).get('display_name')
+        }
+        existing = [entry for entry in existing if entry['uuid'] != client_id]
+        existing.append(updated)
         self.save_json('device_auths', existing)
 
-    def get_refresh_tokens(self) -> dict:
-        if self.isfile('refresh_tokens'):
-            return self.load_json('refresh_tokens')
-        else:
-            return {}
-
-    def store_refresh_token(self, email: str, refresh_token: str) -> None:
-        existing = self.get_refresh_tokens()
-        existing[email.lower()] = refresh_token
-        self.save_json('refresh_tokens', existing)
+    def update_device_auth_display_name(self, client_id: str, display_name: str) -> None:
+        if not client_id or not display_name:
+            return
+        existing = self.get_device_auth_details()
+        for entry in existing:
+            if entry['uuid'] == client_id:
+                if entry.get('display_name') != display_name:
+                    entry['display_name'] = display_name
+                    self.save_json('device_auths', existing)
+                return
 
     def get_cosmetic_presets(self) -> dict:
         if self.isfile('cosmetic_presets'):
@@ -749,6 +774,23 @@ class Bot:
     def save_json(self, key: str, value: Union[dict, list],
                   force_file: Optional[bool] = False,
                   compact: Optional[bool] = False) -> None:
+        if key == 'config' and isinstance(value, dict):
+            value = value.copy()
+            if isinstance(value.get('discord'), dict):
+                value['discord'] = value['discord'].copy()
+                status_type = value['discord'].get('status_type')
+                if hasattr(status_type, 'name'):
+                    value['discord']['status_type'] = status_type.name.lower()
+            if isinstance(value.get('clients'), list):
+                value['clients'] = value['clients'].copy()
+                for index, client_config in enumerate(value['clients']):
+                    if isinstance(client_config, dict) and isinstance(client_config.get('discord'), dict):
+                        status_type = client_config['discord'].get('status_type')
+                        if hasattr(status_type, 'name'):
+                            client_config = client_config.copy()
+                            client_config['discord'] = client_config['discord'].copy()
+                            client_config['discord']['status_type'] = status_type.name.lower()
+                            value['clients'][index] = client_config
         if self.mode == 'repl' and not force_file:
             db[key] = {
                 'last_edited': self.utcnow(),
@@ -976,7 +1018,7 @@ class Bot:
         self.set_dict_key_default(config, ['web', 'port'], 8000)
         self.set_dict_key_default(config, ['check_update_on_startup'], True)
         self.set_dict_key_default(config, ['lang'], 'en')
-        self.set_dict_key_default(config, ['api'], 'BenBot')
+        self.set_dict_key_default(config, ['api'], 'Fortnite-API')
         self.set_dict_key_default(config, ['api_key'], None)
         self.set_dict_key_default(config, ['discord_log'], None)
         self.set_dict_key_default(config, ['loglevel'], 'normal')
@@ -989,6 +1031,10 @@ class Bot:
         else:
             replace = 'localhost'
         config['web']['ip'] = config['web']['ip'].format(ip=replace)
+
+        for client_config in config['clients']:
+            if isinstance(client_config, dict) and isinstance(client_config.get('fortnite'), dict):
+                client_config['fortnite'].setdefault('crowns', 0)
 
         error_config = []
         self.tag_check(config, error_config, '', self.config_tags)
@@ -1193,7 +1239,7 @@ class Bot:
                             final[f"[{repr(key)}][{num}][{n}]"] = v
                     else:
                         final[f"[{repr(key)}][{num}]"] = val
-
+                        
             else:
                 final[f"[{repr(key)}]"] = value
         return final
@@ -1263,7 +1309,7 @@ class Bot:
                             converter = '[value]'
                         else:
                             converter = '[int(value)]'
-
+                    
                 success = False
                 if converter is not None:
                     try:
@@ -1449,7 +1495,7 @@ class Bot:
             return None
         return [
             {
-                'name': option['name'],
+                'name': option.get('name') or option['tag'],
                 'variants': [
                     {
                         'c': variant['channel'],
@@ -1769,29 +1815,21 @@ class Bot:
 
 
     def format_item(self, data: dict, mode: str) -> dict:
-        if mode == 'BenBot':
+        if mode == 'Fortnite-API':
+            backend_type = data['type']['backendValue']
+            path = data.get('path')
+            if path:
+                asset_path = f"{backend_type}ItemDefinition'{path.replace('FortniteGame/Content', '/Game')}.{path.split('/')[-1]}'"
+            else:
+                asset_path = MyClientPartyMember.get_asset_path(backend_type, data['id'])
             return {
                 'id': data['id'],
-                'path': f"{self.convert_backend_type(data['backendType'])}ItemDefinition'{data['path'].replace('FortniteGame/Content', '/Game')}.{data['path'].split('/')[-1]}'",
+                'path': asset_path,
                 'name': data['name'],
-                'url':  data['icons']['icon'],
-                'type': {
-                    'value': self.convert_backend_type(data['backendType']),
-                    'displayValue': data['shortDescription'],
-                    'backendValue': data['backendType']
-                },
-                'set': data['set'],
-                'variants': self.convert_variant(data['variants'])
-            }
-        elif mode == 'Fortnite-API':
-            return {
-                'id': data['id'],
-                'path': f"{data['type']['backendValue']}ItemDefinition'{data['path'].replace('FortniteGame/Content', '/Game')}.{data['path'].split('/')[-1]}'",
-                'name': data['name'],
-                'url': data['images']['icon'],
+                'url': (data.get('images') or {}).get('icon'),
                 'type': data['type'],
-                'set': data['set']['value'] if data['set'] is not None else None,
-                'variants': self.convert_variant(data['variants'])
+                'set': (data.get('set') or {}).get('value'),
+                'variants': self.convert_variant(data.get('variants'))
             }
         elif mode == 'FortniteApi.io':
             return {
@@ -1821,18 +1859,14 @@ class Bot:
             'AthenaEmoji',
             'AthenaToy'
         ]
-        return [item for item in [
+        return [
             self.format_item(item, mode)
             for item in sorted(data, key=lambda x: x['id'])
-        ] if item['type']['backendValue'] in types]
+            if (item.get('type') or {}).get('backendValue') in types
+        ]
 
     async def get_item_data(self, lang: str) -> list:
-        if self.config['api'] == 'BenBot':
-            return self.format_items(await self.http.get(
-                'http://benbot.app/api/v1/cosmetics/br',
-                params={'lang': lang}
-            ), self.config['api'])
-        elif self.config['api'] == 'Fortnite-API':
+        if self.config['api'] == 'Fortnite-API':
             return self.format_items((await self.http.get(
                 'https://fortnite-api.com/v2/cosmetics/br',
                 params={'language': lang}
@@ -1878,16 +1912,11 @@ class Bot:
             f'{self.item_dir}/items_{lang}',
             items,
             force_file=True,
-            compact=True
+            compact=False
         )
 
     async def get_new_item_data(self, lang: str) -> list:
-        if self.config['api'] == 'BenBot':
-            return self.format_items((await self.http.get(
-                'http://benbot.app/api/v1/newCosmetics',
-                params={'lang': lang}
-            ))['items'], self.config['api'])
-        elif self.config['api'] == 'Fortnite-API':
+        if self.config['api'] == 'Fortnite-API':
             return self.format_items((await self.http.get(
                 'https://fortnite-api.com/v2/cosmetics/br/new',
                 params={'language': lang}
@@ -1918,7 +1947,7 @@ class Bot:
             f'{self.item_dir}/new_items_{lang}',
             {'api': self.config['api'], 'items': data},
             force_file=True,
-            compact=True
+            compact=False
         )
 
 
@@ -1941,9 +1970,7 @@ class Bot:
         ]
 
     async def get_playlists_data(self, lang: str) -> list:
-        if self.config['api'] == 'BenBot':
-            return []
-        elif self.config['api'] == 'Fortnite-API':
+        if self.config['api'] == 'Fortnite-API':
             return self.format_playlists(
                 (await self.http.get(
                     'https://fortnite-api.com/v1/playlists',
@@ -1973,24 +2000,12 @@ class Bot:
             f'{self.item_dir}/playlists_{lang}',
             playlists,
             force_file=True,
-            compact=True
+            compact=False
         )
 
 
     async def get_banner_data(self) -> dict:
-        if self.config['api'] == 'BenBot':
-            data = await self.http.get(
-                'https://benbot.app/api/v1/files/search',
-                params={
-                    'matchMethod': 'starts',
-                    'path': 'FortniteGame/Content/Items/BannerIcons/'
-                }
-            )
-            url = 'https://benbot.app/api/v1/exportAsset?path={}&rawIcon=true'
-            return {
-                banner[39:-7]: url.format(banner) for banner in data
-            }
-        elif self.config['api'] == 'Fortnite-API':
+        if self.config['api'] == 'Fortnite-API':
             data = (await self.http.get(
                 'https://fortnite-api.com/v1/banners'
             ))['data']
@@ -2014,60 +2029,30 @@ class Bot:
             f'{self.item_dir}/banners',
             banners,
             force_file=True,
-            compact=True
+            compact=False
         )
 
     def get_banner_url(self, banner_id: str) -> Optional[str]:
         return self.banners.get(banner_id, self.web.url_for('static', filename='images/banner.jpg'))
 
 
-    async def error_callback(self, client: Client, e: Exception):
+
+    def error_callback(self, client: Client, e: Exception):
         if client.discord_client is not None and client.discord_client.is_error:
             self.print_exception(e)
             self.send(
-                self.l(
-                    'discord_login_failed',
-                    self.config['discord']['token']
-                ),
+                self.l('discord_login_failed', self.config['discord']['token']),
                 add_p=self.time,
                 file=sys.stderr
             )
             return
 
-        if isinstance(e, rebootpy.AuthException):
-            if 'Invalid device auth details passed.' in e.args[0]:
-                self.debug_print_exception(e)
-                self.send(
-                    self.l(
-                        'device_auth_error',
-                        client.config['fortnite']['email']
-                    ),
-                    add_p=self.time,
-                    file=sys.stderr
-                )
-                details = self.get_device_auth_details()
-                details.pop(client.config['fortnite']['email'], None)
-                self.save_json('device_auths', details)
-            else:
-                self.print_exception(e)
-                self.send(
-                    self.l(
-                        'login_failed',
-                        client.config['fortnite']['email']
-                    ),
-                    add_p=self.time,
-                    file=sys.stderr
-                )
-        else:
-            self.print_exception(e)
-            self.send(
-                self.l(
-                    'login_failed',
-                    client.config['fortnite']['email']
-                ),
-                add_p=self.time,
-                file=sys.stderr
-            )
+        self.print_exception(e)
+        self.send(
+            self.l('login_failed', client.config.get('id', str(client.num))),
+            add_p=self.time,
+            file=sys.stderr
+        )
 
     async def all_ready_callback(self):
         if len(self.clients) > 1:
@@ -2104,7 +2089,7 @@ class Bot:
         if flag:
             tasks.append(self.loop.create_task(self.store_item_data(self.config['search_lang'])))
 
-        if self.isfile(f"{self.item_dir}/items_{self.config['sub_search_lang']}", force_file=True):
+        if self.config['sub_search_lang'] != self.config['search_lang'] and self.isfile(f"{self.item_dir}/items_{self.config['sub_search_lang']}", force_file=True):
             try:
                 items = await self.aload_json(f"{self.item_dir}/items_{self.config['sub_search_lang']}", force_file=True)
             except json.decoder.JSONDecodeError as e:
@@ -2122,7 +2107,7 @@ class Bot:
                     )
         else:
             flag = True
-        if flag:
+        if flag and self.config['sub_search_lang'] != self.config['search_lang']:
             tasks.append(self.loop.create_task(self.store_item_data(self.config['sub_search_lang'])))
 
         exception = False
@@ -2146,37 +2131,36 @@ class Bot:
                     if not self.isfile(f'{self.item_dir}/items_{lang}', force_file=True):
                         sys.exit(1)
 
-        # New cosmetics
-        tasks = []
-        if self.isfile(f"{self.item_dir}/new_items_{self.config['search_lang']}", force_file=True):
-            try:
-                items = await self.aload_json(f"{self.item_dir}/new_items_{self.config['search_lang']}", force_file=True)
-            except json.decoder.JSONDecodeError as e:
-                self.debug_print_exception(e)
-                await self.aremove(f"{self.item_dir}/new_items_{self.config['search_lang']}", force_file=True)
-                flag = True
-            else:
-                if items['api'] != self.config['api']:
+        for lang in dict.fromkeys((self.config['search_lang'], self.config['sub_search_lang'])):
+            path = f'{self.item_dir}/new_items_{lang}'
+            if self.isfile(path, force_file=True):
+                try:
+                    items = await self.aload_json(path, force_file=True)
+                except (json.decoder.JSONDecodeError, KeyError) as e:
+                    self.debug_print_exception(e)
+                    await self.aremove(path, force_file=True)
                     flag = True
                 else:
-                    flag = self.is_not_edited_for(
-                        f"{self.item_dir}/new_items_{self.config['search_lang']}",
+                    flag = items.get('api') != self.config['api'] or self.is_not_edited_for(
+                        path,
                         datetime.timedelta(hours=2),
                         force_file=True
                     )
-        else:
-            flag = True
-        if flag:
-            try:
-                await self.store_new_item_data(self.config['search_lang'])
-            except Exception as e:
-                self.print_exception(e)
-                self.send(
-                    self.l(
-                        'get_item_failed'
-                    ),
-                    file=sys.stderr
-                )
+            else:
+                flag = True
+            if flag:
+                try:
+                    await self.store_new_item_data(lang)
+                except Exception as e:
+                    self.print_exception(e)
+                    self.send(self.l('get_item_failed'), file=sys.stderr)
+                    if not self.isfile(path, force_file=True):
+                        self.save_json(
+                            path,
+                            {'api': self.config['api'], 'items': {}},
+                            force_file=True,
+                            compact=False
+                        )
 
         # Playlists
         tasks = []
@@ -2201,7 +2185,7 @@ class Bot:
         if flag:
             tasks.append(self.loop.create_task(self.store_playlists_data(self.config['search_lang'])))
 
-        if self.isfile(f"{self.item_dir}/playlists_{self.config['sub_search_lang']}", force_file=True):
+        if self.config['sub_search_lang'] != self.config['search_lang'] and self.isfile(f"{self.item_dir}/playlists_{self.config['sub_search_lang']}", force_file=True):
             try:
                 playlists = await self.aload_json(f"{self.item_dir}/playlists_{self.config['sub_search_lang']}", force_file=True)
             except json.decoder.JSONDecodeError as e:
@@ -2219,7 +2203,7 @@ class Bot:
                     )
         else:
             flag = True
-        if flag:
+        if flag and self.config['sub_search_lang'] != self.config['search_lang']:
             tasks.append(self.loop.create_task(self.store_playlists_data(self.config['sub_search_lang'])))
 
         exception = False
@@ -2265,6 +2249,38 @@ class Bot:
                 flag = True
             if flag:
                 await self.store_banner_data()
+
+        required_files = [
+            f'{self.item_dir}/items_{lang}'
+            for lang in (self.config['search_lang'], self.config['sub_search_lang'])
+        ] + [
+            f'{self.item_dir}/playlists_{lang}'
+            for lang in (self.config['search_lang'], self.config['sub_search_lang'])
+        ] + [
+            f'{self.item_dir}/new_items_{lang}'
+            for lang in (self.config['search_lang'], self.config['sub_search_lang'])
+        ]
+        if all(self.isfile(path, force_file=True) for path in required_files):
+            self.cleanup_item_languages()
+
+    def cleanup_item_languages(self) -> None:
+        active_languages = {
+            str(self.config[key]).lower()
+            for key in ('search_lang', 'sub_search_lang')
+            if self.config.get(key)
+        }
+        item_directory = os.path.join(self.item_dir)
+        for filename in os.listdir(item_directory):
+            for prefix in ('items_', 'new_items_', 'playlists_'):
+                if not filename.startswith(prefix) or not filename.endswith('.json'):
+                    continue
+                language = filename[len(prefix):-5].lower()
+                if language in active_languages:
+                    break
+                path = os.path.join(item_directory, filename)
+                if os.path.isfile(path):
+                    os.remove(path)
+                break
 
     def load_data(self) -> None:
         self.main_items = CaseInsensitiveDict(self.load_json(
@@ -2470,9 +2486,9 @@ class Bot:
         if self.server is not None:
             await self.server.close()
 
-        coros = {client.wait_until_ready() for client in self.clients}
+        coros = [client.wait_until_ready() for client in self.clients]
         if coros:
-            await asyncio.wait(coros)
+            await asyncio.gather(*coros)
         await rebootpy.close_multiple(
             [client for client in self.clients if client.is_ready() or client.is_booting()]
         )
@@ -2486,6 +2502,17 @@ class Bot:
         while True:
             await asyncio.sleep(60)
             self.store_command_stats()
+
+    async def keep_alive(self) -> None:
+        url = None
+        if self.mode == 'glitch':
+            url = f'https://{os.getenv("PROJECT_DOMAIN")}.glitch.me'
+        elif self.mode == 'repl':
+            url = f'https://{os.getenv("REPL_SLUG")}.{os.getenv("REPL_OWNER")}.repl.co'
+        await self.http.post('https://PublicPinger.gomashio1596.repl.co/api/add', json={'url': url})
+        while True:
+            await asyncio.sleep(300)
+            await self.http.get(url)
 
     async def start(self) -> None:
         self.send(
@@ -2510,14 +2537,9 @@ class Bot:
             handler.setFormatter(logging.Formatter('\u001b[35m %(asctime)s:%(levelname)s:%(name)s: %(message)s \u001b[0m'))
             logger.addHandler(handler)
 
-            logger = logging.getLogger('rebootpy.xmpp')
-            logger.setLevel(level=logging.DEBUG)
-            handler = logging.StreamHandler(sys.stdout)
-            handler.setFormatter(logging.Formatter('\u001b[35m %(asctime)s:%(levelname)s:%(name)s: %(message)s \u001b[0m'))
-            logger.addHandler(handler)
 
         version = sys.version_info
-        if (version.minor != 9 and not self.mode == 'repl'):
+        if (version.major != 3 or version.minor < 10) and self.mode != 'repl':
             self.send(
                 self.l(
                     'not_recommended_version',
@@ -2579,6 +2601,8 @@ class Bot:
             if self.config['restart_in']:
                 self.loop.create_task(self.rebooter())
             self.loop.create_task(self.save_command_stats())
+            if self.mode != 'pc' and self.config['web']['enabled']:
+                self.loop.create_task(self.keep_alive())
         if self.config['web']['enabled'] or self.config['status'] == 0:
             if not self.config['web']['access_log']:
                 logger = getLogger('sanic.root')
@@ -2625,61 +2649,24 @@ class Bot:
         if not self.is_error() and self.config['status'] == 1:
             self.fix_config_all()
             self.save_json('config', self.config)
-            refresh_tokens = {}
-            device_auths = {}
-            if self.use_device_auth:
-                try:
-                    device_auths = self.get_device_auth_details()
-                except (json.decoder.JSONDecodeError, UnicodeDecodeError) as e:
-                    self.debug_print_exception(e)
-                    if self.isfile('device_auths_old'):
-                        self.remove('device_auths_old')
-                    self.rename('device_auths', 'device_auths_old')
-                    try:
-                        self.remove('device_auths')
-                    except Exception as e:
-                        self.debug_print_exception(e)
-            else:
-                try:
-                    refresh_tokens = self.get_refresh_tokens()
-                except (json.decoder.JSONDecodeError, UnicodeDecodeError) as e:
-                    self.debug_print_exception(e)
-                    if self.isfile('refresh_tokens_old'):
-                        self.remove('refresh_tokens_old')
-                    self.rename('refresh_tokens', 'refresh_tokens_old')
-                    try:
-                        self.remove('refresh_tokens')
-                    except Exception as e:
-                        self.debug_print_exception(e)
+            device_auths = self.get_device_auth_details()
 
-            def session_id(email):
-                async def _session_id():
-                    while True:
-                        text = self.l('session_id', email).get_text()
-                        self.web_text = text
-                        async with self.input_lock:
-                            data = await ainput(f'{text}\n')
-                        match = re.search(r'[a-z0-9]{32}', data)
-                        if match is not None:
-                            return match.group()
-
-                return _session_id
-
-            def authorization_code(email):
-                async def _authorization_code():
-                    while True:
-                        text = self.l('authorization_code', email).get_text()
-                        self.web_text = text
-                        data = await ainput(f'{text}\n')
-                        match = re.search(r'[a-z0-9]{32}', data)
-                        if match is not None:
-                            return match.group()
-
-                return _authorization_code
+            seen_account_ids = set()
+            for entry in device_auths:
+                account_id = entry.get('account_id')
+                if account_id and account_id in seen_account_ids:
+                    raise ValueError('Duplicate Epic Account ID')
+                if account_id:
+                    seen_account_ids.add(account_id)
 
             for num, config in enumerate(self.config['clients']):
-                refresh_token = refresh_tokens.get(config['fortnite']['email'].lower(), None)
-                device_auth_details = device_auths.get(config['fortnite']['email'].lower(), {})
+                client_id = config.get('id')
+                if not isinstance(client_id, str) or not client_id:
+                    client_id = str(uuid.uuid4())
+                    config['id'] = client_id
+                device_auth_details = next(
+                    (entry for entry in device_auths if entry['uuid'] == client_id), {}
+                )
 
                 party_meta = []
                 if config['fortnite']['party']['playlist']:
@@ -2688,22 +2675,16 @@ class Bot:
                         playlist=(self.get_config_playlist_id(config['fortnite']['party']['playlist'])
                                   or config['fortnite']['party']['playlist'])
                     ))
-                if config['fortnite']['party']['disable_voice_chat']:
-                    party_meta.append(partial(
-                        MyClientParty.disable_voice_chat
-                    ))
 
                 member_meta = [
                     partial(
-                        MyClientPartyMember.set_banner,
-                        icon=config['fortnite']['banner_id'],
-                        color=config['fortnite']['banner_color'],
-                        season_level=config['fortnite']['level']
-                    ),
-                    partial(
                         MyClientPartyMember.set_battlepass_info,
                         has_purchased=True,
-                        level=config['fortnite']['tier']
+                        level=config['fortnite']['level']
+                    ),
+                    partial(
+                        MyClientPartyMember.set_victory_crowns,
+                        crowns=config['fortnite']['crowns']
                     )
                 ]
                 items = [
@@ -2750,10 +2731,11 @@ class Bot:
                     wait_for_member_meta_in_events=False,
                     loop=self.loop
                 )
+                client.client_id = client_id
 
                 client.default_party_config = rebootpy.DefaultPartyConfig(
                     cls=MyClientParty,
-                    privacy=getattr(config['fortnite']['party']['privacy'], 'value', config['fortnite']['party']['privacy']),
+                    privacy=config['fortnite']['party']['privacy'].value,
                     team_change_allowed=config['fortnite']['party']['allow_swap'],
                     max_size=config['fortnite']['party']['max_size'],
                     meta=party_meta
@@ -2763,6 +2745,8 @@ class Bot:
                     meta=member_meta
                 )
                 self.clients.append(client)
+
+            self.save_json('config', self.config)
 
             if len(self.clients) == 0:
                 self.send(
