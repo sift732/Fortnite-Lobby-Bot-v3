@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .bot import Bot
 
 
-__version__ = '3.0.1'
+__version__ = '3.0.2'
 class Updater:
     version = __version__
 
@@ -95,14 +95,17 @@ class Updater:
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
 
+            'commands.json': ['diff', 'db', 'backup'],
+            'config.json': ['diff', 'db', 'backup'],
+            'custom_commands.json': ['diff', 'db', 'backup'],
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
             'README_EN.md': [],
             'README_ES.md': [],
+            'replies.json': ['diff', 'db', 'backup'],
             'requirements.txt': []
         }
-        self.personal_settings = ('commands', 'config', 'custom_commands', 'replies')
         self.pc_updates = {
             'INSTALL.bat': [],
             'RUN.bat': []
@@ -154,31 +157,24 @@ class Updater:
             False
         )
 
-        backup_path = f'{dirs}{key}_old.{extension}'
-
-        async def apply_file_update(content, json_file=False):
-            existed = os.path.isfile(path)
-            if existed:
-                if os.path.isfile(backup_path):
-                    os.remove(backup_path)
-                await areplace(path, backup_path)
-
-            try:
-                if json_file:
-                    self.bot.save_json(f'{dirs}{key}', content, force_file=True)
-                elif 'raw' in tags:
-                    async with aopen(save, 'wb') as f:
-                        await f.write(content)
-                else:
-                    async with aopen(save, 'w', encoding='utf-8') as f:
-                        await f.write(content)
-            except BaseException:
-                if existed:
-                    await areplace(backup_path, path)
-                raise
-            else:
-                if existed and os.path.isfile(backup_path):
-                    os.remove(backup_path)
+        async def backup():
+            if os.path.isfile(path) and 'backup' in tags:
+                try:
+                    if os.path.isfile(f'{dirs}{key}_old.{extension}'):
+                        os.remove(f'{dirs}{key}_old.{extension}')
+                    await areplace(path, f'{dirs}{key}_old.{extension}')
+                except PermissionError:
+                    self.bot.send(
+                        self.l(
+                            'backup_failed',
+                            path,
+                            default=(
+                                "'{0}' のバックアップに失敗しました\n"
+                                "Failed backup for '{0}'"
+                            )
+                        ),
+                        add_p=self.bot.time
+                    )
 
         self.bot.send(
             self.l(
@@ -232,7 +228,7 @@ class Updater:
                     ),
                     add_p=self.bot.time
                 )
-                return False, None
+                raise RuntimeError(f"File not found: {path}")
             if res.status != 200:
                 retry_after = 10
                 res.release()
@@ -281,7 +277,9 @@ class Updater:
                             else:
                                 if dirs:
                                     os.makedirs(dirs, exist_ok=True)
-                                await apply_file_update(new, json_file=True)
+                                await backup()
+                                async with aopen(save, 'w', encoding='utf-8') as f:
+                                    await f.write(json.dumps(new, ensure_ascii=False, indent=4) + '\n')
                         return True, new
                 else:
                     if existing != latest:
@@ -302,7 +300,9 @@ class Updater:
                             else:
                                 if dirs:
                                     os.makedirs(dirs, exist_ok=True)
-                                await apply_file_update(latest, json_file=True)
+                                await backup()
+                                async with aopen(save, 'w', encoding='utf-8') as f:
+                                    await f.write(json.dumps(latest, ensure_ascii=False, indent=4) + '\n')
                         return True, latest
             else:
                 if 'raw' in tags:
@@ -330,7 +330,13 @@ class Updater:
                         )
                         if dirs:
                             os.makedirs(dirs, exist_ok=True)
-                        await apply_file_update(latest)
+                        await backup()
+                        if 'raw' in tags:
+                            async with aopen(save, 'wb') as f:
+                                await f.write(latest)
+                        else:
+                            async with aopen(save, 'w', encoding='utf-8') as f:
+                                await f.write(latest)
                     return True, latest
             return False, latest
 
@@ -339,8 +345,6 @@ class Updater:
         uri = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
 
         try:
-            await self.recover_old_files(uri)
-            await self.sync_personal_settings(uri)
             async with self.bot.http.session.get(f'{uri}version.json') as res:
                 if res.status != 200:
                     raise RuntimeError(f'HTTP {res.status}: version.json')
@@ -359,7 +363,6 @@ class Updater:
 
             await self.update(uri)
             await self.write_version(remote_version)
-            self.cleanup_old_files()
 
         except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
             self.bot.send(
@@ -374,134 +377,6 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
-
-    def merge_settings(self, existing: dict, defaults: dict) -> dict:
-        if not isinstance(existing, dict) or not isinstance(defaults, dict):
-            raise TypeError('Settings root must be an object')
-        merged = existing.copy()
-        for key, value in defaults.items():
-            if key not in merged:
-                merged[key] = value
-            elif isinstance(value, dict) and isinstance(merged[key], dict):
-                merged[key] = self.merge_settings(merged[key], value)
-        return merged
-
-    async def sync_personal_settings(self, uri: str) -> None:
-        for key in self.personal_settings:
-            path = f'{key}.json'
-            old_path = f'{key}_old.json'
-            if self.bot.mode == 'repl' and self.bot.isfile(key):
-                existing = self.bot.load_json(key)
-                source = 'db'
-            elif os.path.isfile(path):
-                with open(path, encoding='utf-8-sig') as f:
-                    existing = json.load(f)
-                source = 'file'
-            elif os.path.isfile(old_path):
-                with open(old_path, encoding='utf-8-sig') as f:
-                    existing = json.load(f)
-                source = 'old'
-            else:
-                continue
-
-            async with self.bot.http.session.get(uri + path) as res:
-                if res.status == 404:
-                    continue
-                if res.status != 200:
-                    raise RuntimeError(f'HTTP {res.status}: {path}')
-                defaults = await res.json(content_type=None)
-            merged = self.merge_settings(existing, defaults)
-            if source == 'db':
-                if merged != existing:
-                    self.bot.save_json(key, merged)
-            elif source == 'file':
-                if merged != existing:
-                    temporary = f'{path}.settings_tmp'
-                    try:
-                        async with aopen(temporary, 'w', encoding='utf-8') as f:
-                            await f.write(json.dumps(merged, ensure_ascii=False, indent=4))
-                        await areplace(temporary, path)
-                    finally:
-                        if os.path.isfile(temporary):
-                            os.remove(temporary)
-            else:
-                temporary = f'{path}.settings_tmp'
-                try:
-                    async with aopen(temporary, 'w', encoding='utf-8') as f:
-                        await f.write(json.dumps(merged, ensure_ascii=False, indent=4))
-                    await areplace(temporary, path)
-                finally:
-                    if os.path.isfile(temporary):
-                        os.remove(temporary)
-            if os.path.isfile(path) and os.path.isfile(old_path):
-                os.remove(old_path)
-
-    async def recover_old_files(self, uri: str) -> None:
-        paths = list(self.updates)
-        if self.bot.mode == 'pc':
-            paths.extend(self.pc_updates)
-        elif self.bot.mode == 'repl':
-            paths.extend(self.repl_updates)
-
-        for path in paths:
-            root, extension = os.path.splitext(path)
-            backup_path = f'{root}_old{extension}'
-            if not os.path.isfile(backup_path):
-                continue
-
-            self.bot.send(
-                self.l('checking_update', path),
-                add_p=self.bot.time
-            )
-            try:
-                async with self.bot.http.session.get(uri + path) as res:
-                    if res.status != 200:
-                        raise RuntimeError(f'HTTP {res.status}: {path}')
-                    if extension == '.json':
-                        latest = await res.json(content_type=None)
-                    else:
-                        latest = await res.read()
-
-                if extension == '.json':
-                    with open(backup_path, 'r', encoding='utf-8-sig') as f:
-                        old_data = json.load(f)
-                    tags = self.updates.get(path, self.pc_updates.get(path, self.repl_updates.get(path, [])))
-                    if 'diff' in tags:
-                        latest = self.add_new_key(old_data, latest, False)
-                    payload = json.dumps(latest, ensure_ascii=False, indent=4).encode('utf-8')
-                else:
-                    payload = latest
-
-                temporary = f'{path}.recovery_tmp'
-                try:
-                    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-                    async with aopen(temporary, 'wb') as f:
-                        await f.write(payload)
-                    await areplace(temporary, path)
-                finally:
-                    if os.path.isfile(temporary):
-                        os.remove(temporary)
-
-                os.remove(backup_path)
-                self.bot.send(
-                    self.l('update_detected', path),
-                    add_p=self.bot.time
-                )
-            except Exception as exc:
-                raise RuntimeError(f'Recovery failed for {path}: {exc}') from exc
-
-    def cleanup_old_files(self) -> None:
-        paths = list(self.updates)
-        if self.bot.mode == 'pc':
-            paths.extend(self.pc_updates)
-        elif self.bot.mode == 'repl':
-            paths.extend(self.repl_updates)
-
-        for path in paths:
-            root, extension = os.path.splitext(path)
-            backup_path = f'{root}_old{extension}'
-            if os.path.isfile(path) and os.path.isfile(backup_path):
-                os.remove(backup_path)
 
     async def write_version(self, remote_version: str) -> None:
         path = os.path.abspath(__file__)
