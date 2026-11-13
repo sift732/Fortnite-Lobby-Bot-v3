@@ -401,14 +401,21 @@ class Updater:
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)
-
+                
     async def update(self, uri: str) -> None:
-        for path in self.updates:
-            await self.check_update(uri, path)
+        semaphore = asyncio.Semaphore(10)
+
+        async def update_file(path: str) -> None:
+            async with semaphore:
+                await self.check_update(uri, path)
+
+        paths = list(self.updates)
 
         if self.bot.mode == 'pc':
-            for path in self.pc_updates:
-                await self.check_update(uri, path)
+            paths.extend(self.pc_updates)
         elif self.bot.mode == 'repl':
-            for path in self.repl_updates:
-                await self.check_update(uri, path)
+            paths.extend(self.repl_updates)
+
+        await asyncio.gather(
+            *(update_file(path) for path in paths)
+        )
