@@ -1456,9 +1456,6 @@ class Bot:
                                        error_list, f'{prefix}{key}[{num}]',
                                        getattr(self, f'{config_tag}_tags'))
 
-    def cleanup_email(self, email: str) -> str:
-        return re.sub(r'\.|\+', '', email).lower()
-
     def cleanup_code(self, content: str) -> str:
         if content.startswith('```') and content.endswith('```'):
             return '\n'.join(content.split('\n')[1:-1])
@@ -2503,17 +2500,6 @@ class Bot:
             await asyncio.sleep(60)
             self.store_command_stats()
 
-    async def keep_alive(self) -> None:
-        url = None
-        if self.mode == 'glitch':
-            url = f'https://{os.getenv("PROJECT_DOMAIN")}.glitch.me'
-        elif self.mode == 'repl':
-            url = f'https://{os.getenv("REPL_SLUG")}.{os.getenv("REPL_OWNER")}.repl.co'
-        await self.http.post('https://PublicPinger.gomashio1596.repl.co/api/add', json={'url': url})
-        while True:
-            await asyncio.sleep(300)
-            await self.http.get(url)
-
     async def start(self) -> None:
         self.send(
             self.l('credit'),
@@ -2601,8 +2587,6 @@ class Bot:
             if self.config['restart_in']:
                 self.loop.create_task(self.rebooter())
             self.loop.create_task(self.save_command_stats())
-            if self.mode != 'pc' and self.config['web']['enabled']:
-                self.loop.create_task(self.keep_alive())
         if self.config['web']['enabled'] or self.config['status'] == 0:
             if not self.config['web']['access_log']:
                 logger = getLogger('sanic.root')
