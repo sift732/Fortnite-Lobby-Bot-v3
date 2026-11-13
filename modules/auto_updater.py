@@ -21,6 +21,7 @@ class Updater:
 
     def __init__(self, bot: 'Bot'):
         self.bot = bot
+        self.protected_files = frozenset(('commands.json', 'config.json', 'custom_commands.json', 'replies.json'))
         self.updates = {
             'docs/en/commands.md': [],
             'docs/en/config.md': [],
@@ -95,15 +96,11 @@ class Updater:
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
 
-            'commands.json': ['diff', 'db', 'backup'],
-            'config.json': ['diff', 'db', 'backup'],
-            'custom_commands.json': ['diff', 'db', 'backup'],
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
             'README_EN.md': [],
             'README_ES.md': [],
-            'replies.json': ['diff', 'db', 'backup'],
             'requirements.txt': []
         }
         self.pc_updates = {
@@ -144,6 +141,8 @@ class Updater:
 
     async def check_update(self, uri: str, path: str, save: Optional[str] = None,
                            write: Optional[bool] = True) -> Tuple[bool, Optional[Union[bytes, str]]]:
+        if path.replace('\\', '/').removeprefix('./') in self.protected_files:
+            return False, None
         dirs = '/'.join(path.split('/')[:-1])
         dirs = f'{dirs}/' if dirs else ''
         filename = path.split('/')[-1]
