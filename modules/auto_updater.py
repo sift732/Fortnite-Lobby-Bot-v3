@@ -157,24 +157,31 @@ class Updater:
             False
         )
 
-        async def backup():
-            if os.path.isfile(path) and 'backup' in tags:
-                try:
-                    if os.path.isfile(f'{dirs}{key}_old.{extension}'):
-                        os.remove(f'{dirs}{key}_old.{extension}')
-                    await areplace(path, f'{dirs}{key}_old.{extension}')
-                except PermissionError:
-                    self.bot.send(
-                        self.l(
-                            'backup_failed',
-                            path,
-                            default=(
-                                "'{0}' のバックアップに失敗しました\n"
-                                "Failed backup for '{0}'"
-                            )
-                        ),
-                        add_p=self.bot.time
-                    )
+        backup_path = f'{dirs}{key}_old.{extension}'
+
+        async def apply_file_update(content, json_file=False):
+            existed = os.path.isfile(path)
+            if existed:
+                if os.path.isfile(backup_path):
+                    os.remove(backup_path)
+                await areplace(path, backup_path)
+
+            try:
+                if json_file:
+                    self.bot.save_json(f'{dirs}{key}', content, force_file=True)
+                elif 'raw' in tags:
+                    async with aopen(save, 'wb') as f:
+                        await f.write(content)
+                else:
+                    async with aopen(save, 'w', encoding='utf-8') as f:
+                        await f.write(content)
+            except BaseException:
+                if existed:
+                    await areplace(backup_path, path)
+                raise
+            else:
+                if existed and os.path.isfile(backup_path):
+                    os.remove(backup_path)
 
         self.bot.send(
             self.l(
@@ -277,8 +284,7 @@ class Updater:
                             else:
                                 if dirs:
                                     os.makedirs(dirs, exist_ok=True)
-                                await backup()
-                                self.bot.save_json(f'{dirs}{key}', new, force_file=True)
+                                await apply_file_update(new, json_file=True)
                         return True, new
                 else:
                     if existing != latest:
@@ -299,8 +305,7 @@ class Updater:
                             else:
                                 if dirs:
                                     os.makedirs(dirs, exist_ok=True)
-                                await backup()
-                                self.bot.save_json(f'{dirs}{key}', latest, force_file=True)
+                                await apply_file_update(latest, json_file=True)
                         return True, latest
             else:
                 if 'raw' in tags:
@@ -328,13 +333,7 @@ class Updater:
                         )
                         if dirs:
                             os.makedirs(dirs, exist_ok=True)
-                        await backup()
-                        if 'raw' in tags:
-                            async with aopen(save, 'wb') as f:
-                                await f.write(latest)
-                        else:
-                            async with aopen(save, 'w', encoding='utf-8') as f:
-                                await f.write(latest)
+                        await apply_file_update(latest)
                     return True, latest
             return False, latest
 
