@@ -46,20 +46,20 @@ else:
     db = None
 
 discord = importlib.import_module('nextcord')
-fortnitepy = importlib.import_module('fortnitepy')
+rebootpy = importlib.import_module('rebootpy')
 _ = importlib.import_module('pykakasi')
 kakasi = _.kakasi
 
 
 Message = Union[
-    fortnitepy.FriendMessage,
-    fortnitepy.PartyMessage,
+    rebootpy.FriendMessage,
+    rebootpy.PartyMessage,
     discord.Message,
     WebMessage
 ]
 Author = Union[
-    fortnitepy.Friend,
-    fortnitepy.PartyMember,
+    rebootpy.Friend,
+    rebootpy.PartyMember,
     discord.User,
     discord.Member,
     WebUser
@@ -405,7 +405,7 @@ class Bot:
             "['fortnite']['party']['playlist']": [str],
             "['fortnite']['party']['disable_voice_chat']": [bool, 'select_bool'],
             "['fortnite']['avatar_id']": [str, 'can_be_none'],
-            "['fortnite']['avatar_color']": [str, 'can_be_multiple', 'lambda x: x and (len(x.split(",")) >= 3) if "," in x else (getattr(fortnitepy.KairosBackgroundColorPreset, x.upper(), None) is not None)'],  # noqa
+            "['fortnite']['avatar_color']": [str, 'can_be_multiple', 'can_be_none'],  # noqa
             "['fortnite']['banner_id']": [str],
             "['fortnite']['banner_color']": [str],
             "['fortnite']['level']": [int],
@@ -2031,7 +2031,7 @@ class Bot:
             )
             return
 
-        if isinstance(e, fortnitepy.AuthException):
+        if isinstance(e, rebootpy.AuthException):
             if 'Invalid device auth details passed.' in e.args[0]:
                 self.debug_print_exception(e)
                 self.send(
@@ -2043,7 +2043,7 @@ class Bot:
                     file=sys.stderr
                 )
                 details = self.get_device_auth_details()
-                details.pop(client.config['fortnite']['email'])
+                details.pop(client.config['fortnite']['email'], None)
                 self.save_json('device_auths', details)
             else:
                 self.print_exception(e)
@@ -2296,7 +2296,7 @@ class Bot:
                 config['fortnite']['party']['privacy'].upper()
             )
         if isinstance(config['fortnite']['platform'], str):
-            config['fortnite']['platform'] = fortnitepy.Platform(
+            config['fortnite']['platform'] = rebootpy.Platform(
                 config['fortnite']['platform'].upper()
             )
         for num, channel in enumerate(config['discord']['channels']):
@@ -2308,7 +2308,7 @@ class Bot:
             )
         if config['fortnite']['ng_platforms'] is not None:
             for num, ng_platform in enumerate(config['fortnite']['ng_platforms']):
-                config['fortnite']['ng_platforms'][num] = fortnitepy.Platform(
+                config['fortnite']['ng_platforms'][num] = rebootpy.Platform(
                     ng_platform.upper()
                 )
         self.fix_cosmetic_config(config)
@@ -2470,7 +2470,7 @@ class Bot:
         coros = {client.wait_until_ready() for client in self.clients}
         if coros:
             await asyncio.wait(coros)
-        await fortnitepy.close_multiple(
+        await rebootpy.close_multiple(
             [client for client in self.clients if client.is_ready() or client.is_booting()]
         )
         await self.http.close()
@@ -2495,19 +2495,19 @@ class Bot:
         )
 
         if self.config['debug']:
-            logger = logging.getLogger('fortnitepy.auth')
+            logger = logging.getLogger('rebootpy.auth')
             logger.setLevel(level=logging.DEBUG)
             handler = logging.StreamHandler(sys.stdout)
             handler.setFormatter(logging.Formatter('\u001b[35m %(asctime)s:%(levelname)s:%(name)s: %(message)s \u001b[0m'))
             logger.addHandler(handler)
 
-            logger = logging.getLogger('fortnitepy.http')
+            logger = logging.getLogger('rebootpy.http')
             logger.setLevel(level=logging.DEBUG)
             handler = logging.StreamHandler(sys.stdout)
             handler.setFormatter(logging.Formatter('\u001b[35m %(asctime)s:%(levelname)s:%(name)s: %(message)s \u001b[0m'))
             logger.addHandler(handler)
 
-            logger = logging.getLogger('fortnitepy.xmpp')
+            logger = logging.getLogger('rebootpy.xmpp')
             logger.setLevel(level=logging.DEBUG)
             handler = logging.StreamHandler(sys.stdout)
             handler.setFormatter(logging.Formatter('\u001b[35m %(asctime)s:%(levelname)s:%(name)s: %(message)s \u001b[0m'))
@@ -2720,66 +2720,42 @@ class Bot:
                     section = 0
                     if item == 'AthenaDance':
                         section = config['fortnite'][f'{conf}_section']
-                    coro = fortnitepy.EditEntry(
+                    coro = partial(
                         MyClientPartyMember.change_asset,
                         item,
                         (self.get_config_item_path(config['fortnite'][conf])
                          or config['fortnite'][conf]),
                         variants=variants,
                         section=section,
-                        keep=False,
-                        name=f'ClientPartyMember.set_{conf}'
+                        keep=False
                     )
                     member_meta.append(coro)
 
-                avatar = fortnitepy.kairos.get_random_default_avatar()
-                background_colors = (
-                    config['fortnite']['avatar_color'].split(',')
-                    if ',' in config['fortnite']['avatar_color'] else
-                    getattr(fortnitepy.KairosBackgroundColorPreset, config['fortnite']['avatar_color'].upper())
+                auth = MyAdvancedAuth(
+                    device_id=device_auth_details.get('device_id'),
+                    account_id=device_auth_details.get('account_id'),
+                    secret=device_auth_details.get('secret')
                 )
-
-                auth = None
-                if self.use_device_auth and device_auth_details:
-                    auth = fortnitepy.DeviceAuth(**device_auth_details)
-                elif self.use_device_auth and self.use_authorization_code:
-                    auth = fortnitepy.AuthorizationCodeAuth(authorization_code(config['fortnite']['email']))
-                if auth is None:
-                    if self.use_device_code:
-                        auth = MyAdvancedAuth(refresh_token)
-                    else:
-                        auth = MyAdvancedAuth(refresh_token, session_id(config['fortnite']['email']))
 
                 client = Client(
                     self,
                     config,
                     num,
                     auth=auth,
-                    avatar=fortnitepy.Avatar(
-                        asset=(
-                            config['fortnite']['avatar_id']
-                            or avatar.asset
-                        ),
-                        background_colors=(
-                            background_colors
-                            if config['fortnite']['avatar_color'] else
-                            avatar.background_colors
-                        )
-                    ),
                     status=config['fortnite']['status'],
                     platform=config['fortnite']['platform'],
                     wait_for_member_meta_in_events=False,
                     loop=self.loop
                 )
 
-                client.default_party_config = fortnitepy.DefaultPartyConfig(
+                client.default_party_config = rebootpy.DefaultPartyConfig(
                     cls=MyClientParty,
-                    privacy=config['fortnite']['party']['privacy'],
+                    privacy=getattr(config['fortnite']['party']['privacy'], 'value', config['fortnite']['party']['privacy']),
                     team_change_allowed=config['fortnite']['party']['allow_swap'],
                     max_size=config['fortnite']['party']['max_size'],
                     meta=party_meta
                 )
-                client.default_party_member_config = fortnitepy.DefaultPartyMemberConfig(
+                client.default_party_member_config = rebootpy.DefaultPartyMemberConfig(
                     cls=MyClientPartyMember,
                     meta=member_meta
                 )
@@ -2793,7 +2769,7 @@ class Bot:
                     await asyncio.sleep(0.1)
             else:
                 tasks = [
-                    fortnitepy.start_multiple(
+                    rebootpy.start_multiple(
                         self.clients,
                         shutdown_on_error=False,
                         error_callback=self.error_callback,
