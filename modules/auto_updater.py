@@ -342,6 +342,7 @@ class Updater:
         uri = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
 
         try:
+            await self.recover_old_files(uri)
             async with self.bot.http.session.get(f'{uri}version.json') as res:
                 if res.status != 200:
                     raise RuntimeError(f'HTTP {res.status}: version.json')
@@ -375,6 +376,60 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
+
+    async def recover_old_files(self, uri: str) -> None:
+        paths = list(self.updates)
+        if self.bot.mode == 'pc':
+            paths.extend(self.pc_updates)
+        elif self.bot.mode == 'repl':
+            paths.extend(self.repl_updates)
+
+        for path in paths:
+            root, extension = os.path.splitext(path)
+            backup_path = f'{root}_old{extension}'
+            if not os.path.isfile(backup_path):
+                continue
+
+            self.bot.send(
+                self.l('checking_update', path),
+                add_p=self.bot.time
+            )
+            try:
+                async with self.bot.http.session.get(uri + path) as res:
+                    if res.status != 200:
+                        raise RuntimeError(f'HTTP {res.status}: {path}')
+                    if extension == '.json':
+                        latest = await res.json(content_type=None)
+                    else:
+                        latest = await res.read()
+
+                if extension == '.json':
+                    with open(backup_path, 'r', encoding='utf-8-sig') as f:
+                        old_data = json.load(f)
+                    tags = self.updates.get(path, self.pc_updates.get(path, self.repl_updates.get(path, [])))
+                    if 'diff' in tags:
+                        latest = self.add_new_key(old_data, latest, False)
+                    payload = json.dumps(latest, ensure_ascii=False, indent=4).encode('utf-8')
+                else:
+                    payload = latest
+
+                temporary = f'{path}.recovery_tmp'
+                try:
+                    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+                    async with aopen(temporary, 'wb') as f:
+                        await f.write(payload)
+                    await areplace(temporary, path)
+                finally:
+                    if os.path.isfile(temporary):
+                        os.remove(temporary)
+
+                os.remove(backup_path)
+                self.bot.send(
+                    self.l('update_detected', path),
+                    add_p=self.bot.time
+                )
+            except Exception as exc:
+                raise RuntimeError(f'Recovery failed for {path}: {exc}') from exc
 
     def cleanup_old_files(self) -> None:
         paths = list(self.updates)
