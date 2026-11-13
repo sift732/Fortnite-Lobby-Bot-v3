@@ -360,6 +360,7 @@ class Updater:
 
             await self.update(uri)
             await self.write_version(remote_version)
+            self.cleanup_old_files()
 
         except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
             self.bot.send(
@@ -374,6 +375,19 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
+
+    def cleanup_old_files(self) -> None:
+        paths = list(self.updates)
+        if self.bot.mode == 'pc':
+            paths.extend(self.pc_updates)
+        elif self.bot.mode == 'repl':
+            paths.extend(self.repl_updates)
+
+        for path in paths:
+            root, extension = os.path.splitext(path)
+            backup_path = f'{root}_old{extension}'
+            if os.path.isfile(path) and os.path.isfile(backup_path):
+                os.remove(backup_path)
 
     async def write_version(self, remote_version: str) -> None:
         path = os.path.abspath(__file__)
