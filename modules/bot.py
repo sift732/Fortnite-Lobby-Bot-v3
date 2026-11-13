@@ -143,7 +143,10 @@ class Bot:
         self.use_device_auth = use_device_auth
         self.use_authorization_code = use_authorization_code
 
-        self.input_lock = asyncio.Lock(loop=loop)
+        if sys.version_info >= (3, 10):
+            self.input_lock = asyncio.Lock()
+        else:
+            self.input_lock = asyncio.Lock(loop=loop)
         self.clients = []
         self.updater = Updater(self)
         self.web = Web(self, 'modules_bot')
