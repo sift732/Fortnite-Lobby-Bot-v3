@@ -15,13 +15,16 @@ if TYPE_CHECKING:
     from .bot import Bot
 
 
-__version__ = '3.0.19'
+__version__ = '3.0.2'
 class Updater:
     version = __version__
 
     def __init__(self, bot: 'Bot'):
         self.bot = bot
+        self._update_backups = set()
+        self._failed_backups = set()
         self.protected_files = frozenset(('commands.json', 'config.json', 'custom_commands.json', 'replies.json'))
+        self.missing_only_files = frozenset(self.protected_files)
         self.updates = {
             'docs/en/commands.md': [],
             'docs/en/config.md': [],
@@ -96,6 +99,10 @@ class Updater:
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
 
+            'commands.json': ['missing_only'],
+            'config.json': ['missing_only'],
+            'custom_commands.json': ['missing_only'],
+            'replies.json': ['missing_only'],
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
@@ -109,8 +116,7 @@ class Updater:
         }
         self.repl_updates = {
             'pyproject.toml': [],
-            '.replit': [],
-            'replit.nix': []
+            '.replit': []
         }
 
     def l(self, key: str, *args: tuple, default: Optional[str] = '', **kwargs: dict) -> LocalizedText:
@@ -141,7 +147,10 @@ class Updater:
 
     async def check_update(self, uri: str, path: str, save: Optional[str] = None,
                            write: Optional[bool] = True) -> Tuple[bool, Optional[Union[bytes, str]]]:
-        if path.replace('\\', '/').removeprefix('./') in self.protected_files:
+        normalized_path = path.replace('\\', '/').removeprefix('./')
+        if normalized_path in self.protected_files and os.path.isfile(path):
+            return False, None
+        if normalized_path in self.protected_files and normalized_path not in self.missing_only_files:
             return False, None
         dirs = '/'.join(path.split('/')[:-1])
         dirs = f'{dirs}/' if dirs else ''
@@ -149,6 +158,7 @@ class Updater:
         key = '.'.join(filename.split('.')[:-1])
         extension = filename.split('.')[-1]
         tags = self.updates.get(path, self.pc_updates.get(path, self.repl_updates.get(path, [])))
+        missing_only = 'missing_only' in tags
         save = save or path
         is_image = (
             True
@@ -159,9 +169,11 @@ class Updater:
         async def backup():
             if os.path.isfile(path) and 'backup' in tags:
                 try:
-                    if os.path.isfile(f'{dirs}{key}_old.{extension}'):
-                        os.remove(f'{dirs}{key}_old.{extension}')
-                    await areplace(path, f'{dirs}{key}_old.{extension}')
+                    backup_path = f'{dirs}{key}_old.{extension}'
+                    if os.path.isfile(backup_path):
+                        raise RuntimeError(f'Backup already exists: {backup_path}')
+                    await areplace(path, backup_path)
+                    self._update_backups.add(backup_path)
                 except PermissionError:
                     self.bot.send(
                         self.l(
@@ -255,6 +267,18 @@ class Updater:
                     existing = json.loads(existing)
                 latest = await res.json(content_type=None)
                 res.release()
+
+                if missing_only:
+                    if not isinstance(latest, (dict, list)):
+                        raise ValueError(f'Invalid JSON data: {path}')
+                    if write:
+                        try:
+                            async with aopen(path, 'x', encoding='utf-8') as f:
+                                await f.write(json.dumps(latest, ensure_ascii=False, indent=4) + '\n')
+                        except FileExistsError:
+                            return False, None
+                        self.bot.send(self.l('update_detected', path), add_p=self.bot.time)
+                    return True, latest
 
                 if 'diff' in tags:
                     new = self.add_new_key(existing, latest, False)
@@ -353,6 +377,7 @@ class Updater:
             if not isinstance(remote_version, str):
                 raise ValueError('Invalid version')
             if version.parse(self.version) >= version.parse(remote_version):
+                await self.restore_missing_configs(uri)
                 return False
 
             self.bot.send(
@@ -360,8 +385,11 @@ class Updater:
                 add_p=self.bot.time
             )
 
-            await self.update(uri)
-            await self.write_version(remote_version)
+            try:
+                await self.update(uri)
+                await self.write_version(remote_version)
+            finally:
+                await self.cleanup_backups()
 
         except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
             self.bot.send(
@@ -376,6 +404,18 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
+
+    async def restore_missing_configs(self, uri: str) -> None:
+        missing = [path for path in self.missing_only_files if not os.path.isfile(path)]
+        if not missing:
+            return
+        results = await asyncio.gather(
+            *(self.check_update(uri, path) for path in missing),
+            return_exceptions=True
+        )
+        for path, result in zip(missing, results):
+            if isinstance(result, BaseException):
+                print(f'Failed to restore missing JSON {path}: {result}', file=sys.stderr)
 
     async def write_version(self, remote_version: str) -> None:
         path = os.path.abspath(__file__)
@@ -401,12 +441,41 @@ class Updater:
             if os.path.exists(temporary):
                 os.remove(temporary)
                 
+    async def cleanup_backups(self) -> None:
+        for backup_path in tuple(self._update_backups):
+            if backup_path in self._failed_backups:
+                continue
+            if os.path.isfile(backup_path):
+                os.remove(backup_path)
+            self._update_backups.discard(backup_path)
+
     async def update(self, uri: str) -> None:
+        self._update_backups.clear()
+        self._failed_backups.clear()
         semaphore = asyncio.Semaphore(10)
 
         async def update_file(path: str) -> None:
             async with semaphore:
-                await self.check_update(uri, path)
+                dirs = '/'.join(path.split('/')[:-1])
+                dirs = f'{dirs}/' if dirs else ''
+                filename = path.split('/')[-1]
+                key = '.'.join(filename.split('.')[:-1])
+                extension = filename.split('.')[-1]
+                backup_path = f'{dirs}{key}_old.{extension}'
+                try:
+                    await self.check_update(uri, path)
+                except Exception:
+                    if backup_path in self._update_backups:
+                        self._failed_backups.add(backup_path)
+                        if os.path.isfile(backup_path):
+                            try:
+                                async with aopen(backup_path, 'rb') as source:
+                                    original = await source.read()
+                                async with aopen(path, 'wb') as target:
+                                    await target.write(original)
+                            except Exception as restore_error:
+                                print(f'Restore failed for {path}: {restore_error}', file=sys.stderr)
+                    raise
 
         paths = list(self.updates)
 
@@ -415,6 +484,12 @@ class Updater:
         elif self.bot.mode == 'repl':
             paths.extend(self.repl_updates)
 
-        await asyncio.gather(
-            *(update_file(path) for path in paths)
+        results = await asyncio.gather(
+            *(update_file(path) for path in paths),
+            return_exceptions=True
         )
+        failures = [(path, result) for path, result in zip(paths, results) if isinstance(result, BaseException)]
+        if failures:
+            for path, error in failures:
+                print(f'Update failed for {path}: {error}', file=sys.stderr)
+            raise RuntimeError(f'{len(failures)} file update(s) failed')
