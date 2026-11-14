@@ -23,8 +23,7 @@ class Updater:
         self.bot = bot
         self._update_backups = set()
         self._failed_backups = set()
-        self.protected_files = frozenset(('commands.json', 'config.json', 'custom_commands.json', 'replies.json'))
-        self.missing_only_files = frozenset(self.protected_files)
+        self.protected_json = ('config.json', 'commands.json', 'custom_commands.json', 'replies.json')
         self.updates = {
             'docs/en/commands.md': [],
             'docs/en/config.md': [],
@@ -99,10 +98,6 @@ class Updater:
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
 
-            'commands.json': ['missing_only'],
-            'config.json': ['missing_only'],
-            'custom_commands.json': ['missing_only'],
-            'replies.json': ['missing_only'],
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
@@ -122,35 +117,9 @@ class Updater:
     def l(self, key: str, *args: tuple, default: Optional[str] = '', **kwargs: dict) -> LocalizedText:
         return LocalizedText(self.bot, ['main', key], default, *args, **kwargs)
 
-    def add_new_key(self, data: dict, new: dict, overwrite: Optional[bool] = False) -> dict:
-        if isinstance(new, dict):
-            result = data.copy()
-            for key, value in new.items():
-                if isinstance(value, dict):
-                    result[key] = self.add_new_key(result.get(key) or {}, value, overwrite)
-                elif isinstance(value, list):
-                    result[key] = self.add_new_key(result.get(key) or [], value, overwrite)
-                if overwrite:
-                    result[key] = value
-                else:
-                    result.setdefault(key, value)
-        else:
-            result = [
-                (self.add_new_key(self.bot.get_list_index(data or [], i, {}), self.bot.get_list_index(new or [], i, {}), overwrite)
-                 if isinstance(self.bot.get_list_index(data or [], i), dict) or isinstance(self.bot.get_list_index(new or [], i), dict) else
-                 self.add_new_key(self.bot.get_list_index(data or [], i, []), self.bot.get_list_index(new or [], i, []), overwrite)
-                 if isinstance(self.bot.get_list_index(data or [], i), list) or isinstance(self.bot.get_list_index(new or [], i), list) else
-                 self.bot.get_list_index(data or [], i, self.bot.get_list_index(new or [], i)))
-                for i in range(max(len(new), len(data or [])))
-            ]
-        return result
-
     async def check_update(self, uri: str, path: str, save: Optional[str] = None,
                            write: Optional[bool] = True) -> Tuple[bool, Optional[Union[bytes, str]]]:
-        normalized_path = path.replace('\\', '/').removeprefix('./')
-        if normalized_path in self.protected_files and os.path.isfile(path):
-            return False, None
-        if normalized_path in self.protected_files and normalized_path not in self.missing_only_files:
+        if path in self.protected_json:
             return False, None
         dirs = '/'.join(path.split('/')[:-1])
         dirs = f'{dirs}/' if dirs else ''
@@ -158,7 +127,6 @@ class Updater:
         key = '.'.join(filename.split('.')[:-1])
         extension = filename.split('.')[-1]
         tags = self.updates.get(path, self.pc_updates.get(path, self.repl_updates.get(path, [])))
-        missing_only = 'missing_only' in tags
         save = save or path
         is_image = (
             True
@@ -263,70 +231,21 @@ class Updater:
                 continue
 
             if path.endswith('.json'):
-                if isinstance(existing, str):
-                    existing = json.loads(existing)
                 latest = await res.json(content_type=None)
                 res.release()
-
-                if missing_only:
-                    if not isinstance(latest, (dict, list)):
-                        raise ValueError(f'Invalid JSON data: {path}')
+                if not isinstance(latest, (dict, list)):
+                    raise ValueError(f'Invalid JSON data: {path}')
+                if isinstance(existing, str) and existing:
+                    existing = json.loads(existing)
+                if existing != latest:
                     if write:
-                        try:
-                            async with aopen(path, 'x', encoding='utf-8') as f:
-                                await f.write(json.dumps(latest, ensure_ascii=False, indent=4) + '\n')
-                        except FileExistsError:
-                            return False, None
+                        if dirs:
+                            os.makedirs(dirs, exist_ok=True)
+                        await backup()
+                        async with aopen(save, 'w', encoding='utf-8') as f:
+                            await f.write(json.dumps(latest, ensure_ascii=False, indent=4) + '\n')
                         self.bot.send(self.l('update_detected', path), add_p=self.bot.time)
                     return True, latest
-
-                if 'diff' in tags:
-                    new = self.add_new_key(existing, latest, False)
-                    if existing != new:
-                        if write:
-                            self.bot.send(
-                                self.l(
-                                    'update_detected',
-                                    path,
-                                    default=(
-                                        "'{0}' のアップデートを確認しました\n"
-                                        "Detected update for '{0}'"
-                                    )
-                                ),
-                                add_p=self.bot.time
-                            )
-                            if 'db' in tags:
-                                self.bot.save_json(key, new)
-                            else:
-                                if dirs:
-                                    os.makedirs(dirs, exist_ok=True)
-                                await backup()
-                                async with aopen(save, 'w', encoding='utf-8') as f:
-                                    await f.write(json.dumps(new, ensure_ascii=False, indent=4) + '\n')
-                        return True, new
-                else:
-                    if existing != latest:
-                        if write:
-                            self.bot.send(
-                                self.l(
-                                    'update_detected',
-                                    path,
-                                    default=(
-                                        "'{0}' のアップデートを確認しました\n"
-                                        "Detected update for '{0}'"
-                                    )
-                                ),
-                                add_p=self.bot.time
-                            )
-                            if 'db' in tags:
-                                self.bot.save_json(key, latest)
-                            else:
-                                if dirs:
-                                    os.makedirs(dirs, exist_ok=True)
-                                await backup()
-                                async with aopen(save, 'w', encoding='utf-8') as f:
-                                    await f.write(json.dumps(latest, ensure_ascii=False, indent=4) + '\n')
-                        return True, latest
             else:
                 if 'raw' in tags:
                     latest = await res.read()
@@ -363,9 +282,28 @@ class Updater:
                     return True, latest
             return False, latest
 
+    async def cleanup_protected_json(self) -> None:
+        for path in self.protected_json:
+            backup = path.removesuffix('.json') + '_old.json'
+            if not os.path.isfile(backup):
+                continue
+            try:
+                if not os.path.isfile(path):
+                    async with aopen(backup, 'r', encoding='utf-8') as source:
+                        content = await source.read()
+                    if not isinstance(json.loads(content), (dict, list)):
+                        raise ValueError(f'Invalid JSON root: {backup}')
+                    os.replace(backup, path)
+                else:
+                    os.remove(backup)
+            except (OSError, UnicodeError, ValueError) as exc:
+                print(f'Protected JSON cleanup failed for {path}: {exc}', file=sys.stderr)
+
     async def check_updates(self, dev: Optional[bool] = False) -> bool:
         branch = 'dev' if dev else 'main'
         uri = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
+
+        await self.cleanup_protected_json()
 
         try:
             async with self.bot.http.session.get(f'{uri}version.json') as res:
@@ -377,7 +315,6 @@ class Updater:
             if not isinstance(remote_version, str):
                 raise ValueError('Invalid version')
             if version.parse(self.version) >= version.parse(remote_version):
-                await self.restore_missing_configs(uri)
                 return False
 
             self.bot.send(
@@ -385,17 +322,12 @@ class Updater:
                 add_p=self.bot.time
             )
 
-            try:
-                await self.update(uri)
-                await self.write_version(remote_version)
-            finally:
-                await self.cleanup_backups()
+            await self.update(uri)
+            await self.write_version(remote_version)
+            await self.cleanup_backups()
+
 
         except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
-            self.bot.send(
-                self.l('get_failed', 'version.json', 0, 1, 1),
-                add_p=self.bot.time
-            )
             print(f"Update failed: {exc}", file=sys.stderr)
             return False
 
@@ -404,18 +336,6 @@ class Updater:
             add_p=[self.bot.time, lambda x: f'\n{x}']
         )
         return True
-
-    async def restore_missing_configs(self, uri: str) -> None:
-        missing = [path for path in self.missing_only_files if not os.path.isfile(path)]
-        if not missing:
-            return
-        results = await asyncio.gather(
-            *(self.check_update(uri, path) for path in missing),
-            return_exceptions=True
-        )
-        for path, result in zip(missing, results):
-            if isinstance(result, BaseException):
-                print(f'Failed to restore missing JSON {path}: {result}', file=sys.stderr)
 
     async def write_version(self, remote_version: str) -> None:
         path = os.path.abspath(__file__)
@@ -477,7 +397,7 @@ class Updater:
                                 print(f'Restore failed for {path}: {restore_error}', file=sys.stderr)
                     raise
 
-        paths = list(self.updates)
+        paths = [path for path in self.updates if path != 'modules/auto_updater.py' and path not in self.protected_json]
 
         if self.bot.mode == 'pc':
             paths.extend(self.pc_updates)
