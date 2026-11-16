@@ -324,7 +324,6 @@ class Updater:
         try:
             with open(temporary, 'x', encoding='utf-8') as target:
                 json.dump(data, target, ensure_ascii=False, indent=4)
-                target.write('\n')
             if os.path.isfile(path):
                 return
             os.replace(temporary, path)
