@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 from aiofiles import open as aopen
@@ -282,22 +284,67 @@ class Updater:
                     return True, latest
             return False, latest
 
+    def ensure_default_json(self, dev: Optional[bool] = False) -> None:
+        branch = 'dev' if dev else 'main'
+        base_url = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
+        for path in self.protected_json:
+            if os.path.isfile(path):
+                continue
+
+            backup = path.removesuffix('.json') + '_old.json'
+            if os.path.isfile(backup):
+                with open(backup, 'r', encoding='utf-8-sig') as source:
+                    restored = json.load(source)
+                if not isinstance(restored, (dict, list)):
+                    raise ValueError(f'Invalid JSON root: {backup}')
+                os.replace(backup, path)
+                continue
+
+            key = path.removesuffix('.json')
+            if self.bot.mode == 'repl' and self.bot.isfile(key):
+                restored = self.bot.load_json(key)
+                if not isinstance(restored, (dict, list)):
+                    raise ValueError(f'Invalid Replit DB JSON root: {key}')
+                self._write_initial_json(path, restored)
+                continue
+
+            try:
+                with urllib.request.urlopen(base_url + path, timeout=20) as response:
+                    if response.status != 200:
+                        raise RuntimeError(f'HTTP {response.status}: {path}')
+                    downloaded = json.loads(response.read().decode('utf-8-sig'))
+            except (OSError, UnicodeError, ValueError, urllib.error.URLError) as exc:
+                raise RuntimeError(f'Failed to retrieve initial JSON: {path}') from exc
+            if not isinstance(downloaded, (dict, list)):
+                raise ValueError(f'Invalid downloaded JSON root: {path}')
+            self._write_initial_json(path, downloaded)
+
+    def _write_initial_json(self, path: str, data: Union[dict, list]) -> None:
+        temporary = f'{path}.tmp'
+        try:
+            with open(temporary, 'x', encoding='utf-8') as target:
+                json.dump(data, target, ensure_ascii=False, indent=4)
+                target.write('\n')
+            if os.path.isfile(path):
+                return
+            os.replace(temporary, path)
+        finally:
+            if os.path.isfile(temporary):
+                os.remove(temporary)
+
     async def cleanup_protected_json(self) -> None:
         for path in self.protected_json:
             backup = path.removesuffix('.json') + '_old.json'
-            if not os.path.isfile(backup):
+            if os.path.isfile(path) or not os.path.isfile(backup):
                 continue
             try:
-                if not os.path.isfile(path):
-                    async with aopen(backup, 'r', encoding='utf-8') as source:
-                        content = await source.read()
-                    if not isinstance(json.loads(content), (dict, list)):
-                        raise ValueError(f'Invalid JSON root: {backup}')
-                    os.replace(backup, path)
-                else:
-                    os.remove(backup)
+                with open(backup, 'r', encoding='utf-8-sig') as source:
+                    content = json.load(source)
+                if not isinstance(content, (dict, list)):
+                    raise ValueError(f'Invalid JSON root: {backup}')
+                os.replace(backup, path)
             except (OSError, UnicodeError, ValueError) as exc:
-                print(f'Protected JSON cleanup failed for {path}: {exc}', file=sys.stderr)
+                print(f'Protected JSON restore failed for {path}: {exc}', file=sys.stderr)
 
     async def check_updates(self, dev: Optional[bool] = False) -> bool:
         branch = 'dev' if dev else 'main'
@@ -360,7 +407,7 @@ class Updater:
         finally:
             if os.path.exists(temporary):
                 os.remove(temporary)
-                
+
     async def cleanup_backups(self) -> None:
         for backup_path in tuple(self._update_backups):
             if backup_path in self._failed_backups:

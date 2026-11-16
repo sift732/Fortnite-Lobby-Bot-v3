@@ -1239,7 +1239,7 @@ class Bot:
                             final[f"[{repr(key)}][{num}][{n}]"] = v
                     else:
                         final[f"[{repr(key)}][{num}]"] = val
-                        
+
             else:
                 final[f"[{repr(key)}]"] = value
         return final
@@ -1309,7 +1309,7 @@ class Bot:
                             converter = '[value]'
                         else:
                             converter = '[int(value)]'
-                    
+
                 success = False
                 if converter is not None:
                     try:
@@ -1567,17 +1567,21 @@ class Bot:
         }
 
     def port_file(self, filename: str, backup: Optional[bool] = True) -> None:
-        if self.mode == 'repl' and os.path.isfile(f'{filename}.json'):
-            data = self.load_json(filename, force_file=True)
-            if backup:
-                if self.isfile(f'{filename}_old', force_file=True):
-                    self.remove(f'{filename}_old', force_file=True)
-                self.rename(filename, f'{filename}_old', force_file=True)
-            try:
-                self.remove(filename, force_file=True)
-            except Exception as e:
-                self.debug_print_exception(e)
-            self.save_json(filename, data)
+        original = f'{filename}.json'
+        old = f'{filename}_old.json'
+
+        if not os.path.isfile(original) and os.path.isfile(old):
+            self.load_json(f'{filename}_old', force_file=True)
+            os.rename(old, original)
+
+        if self.mode != 'repl' or not os.path.isfile(original):
+            return
+
+        if self.isfile(filename):
+            return
+
+        data = self.load_json(filename, force_file=True)
+        self.save_json(filename, data)
 
     def remove_unneeded_files(self) -> None:
         pc_only = [
@@ -1616,12 +1620,13 @@ class Bot:
 
     def setup(self) -> None:
         self.remove_unneeded_files()
+        self.updater.ensure_default_json(self.dev)
         files = [
             ('config',),
             ('commands',),
             ('custom_commands',),
             ('replies',),
-            ('cosmetic_preset',),
+            ('cosmetic_presets',),
             ('command_stats', False),
             ('device_auths', False)
         ]
