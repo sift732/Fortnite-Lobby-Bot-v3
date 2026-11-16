@@ -2483,12 +2483,20 @@ class Bot:
         if self.server is not None:
             await self.server.close()
 
-        coros = [client.wait_until_ready() for client in self.clients]
-        if coros:
-            await asyncio.gather(*coros)
-        await rebootpy.close_multiple(
-            [client for client in self.clients if client.is_ready() or client.is_booting()]
-        )
+        clients = [
+            client for client in self.clients
+            if client.is_ready() or client.is_booting()
+        ]
+
+        if clients:
+            try:
+                await asyncio.wait_for(
+                    rebootpy.close_multiple(clients),
+                    timeout=15
+                )
+            except asyncio.TimeoutError:
+                pass
+
         await self.http.close()
 
     async def rebooter(self) -> None:
