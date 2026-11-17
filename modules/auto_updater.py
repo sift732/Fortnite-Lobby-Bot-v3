@@ -3,21 +3,15 @@ import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.request
 from typing import TYPE_CHECKING, Optional, Tuple, Union
-
 from aiofiles import open as aopen
 from aiofiles.os import replace as areplace
 from packaging import version
-
 from .localize import LocalizedText
-
 if TYPE_CHECKING:
     from .bot import Bot
+__version__ = '3.0.21'
 
-
-__version__ = '3.0.18'
 class Updater:
     version = __version__
 
@@ -36,7 +30,6 @@ class Updater:
             'docs/en/repl.md': [],
             'docs/en/replies.md': [],
             'docs/en/setup.md': [],
-
             'docs/ja/commands.md': [],
             'docs/ja/config.md': [],
             'docs/ja/custom_commands.md': [],
@@ -46,11 +39,9 @@ class Updater:
             'docs/ja/repl.md': [],
             'docs/ja/replies.md': [],
             'docs/ja/setup.md': [],
-
             'lang/en.json': [],
             'lang/es.json': [],
             'lang/ja.json': [],
-
             'modules/__init__.py': ['backup'],
             'modules/auth.py': ['backup'],
             'modules/auto_updater.py': ['backup'],
@@ -66,7 +57,6 @@ class Updater:
             'modules/localize.py': ['backup'],
             'modules/web.py': ['backup'],
             'modules/webhook.py': ['backup'],
-
             'static/css/boot-switch.css': [],
             'static/css/clients-viewer.css': [],
             'static/css/clients-viewer-client.css': [],
@@ -75,7 +65,6 @@ class Updater:
             'static/css/login.css': [],
             'static/css/main.css': [],
             'static/css/markdown.css': [],
-
             'static/images/backpack.jpg': ['raw'],
             'static/images/banner.jpg': ['raw'],
             'static/images/crown.png': ['raw'],
@@ -84,7 +73,6 @@ class Updater:
             'static/images/logo.png': ['raw'],
             'static/images/outfit.jpg': ['raw'],
             'static/images/pickaxe.jpg': ['raw'],
-
             'static/js/boot-switch.js': [],
             'static/js/clients-viewer.js': [],
             'static/js/clients-viewer-client.js': [],
@@ -93,13 +81,11 @@ class Updater:
             'static/js/login.js': [],
             'static/js/main.js': [],
             'static/js/ws.js': [],
-
             'templates/index.jinja': [],
             'templates/login.jinja': [],
             'templates/editor.jinja': [],
             'templates/boot-switch.jinja': [],
             'templates/clients-viewer.jinja': [],
-
             'index.py': ['backup'],
             'LICENSE': [],
             'README.md': [],
@@ -135,7 +121,6 @@ class Updater:
             if path.endswith('.png') or path.endswith('.jpg') or path.endswith('.ico') else
             False
         )
-
         async def backup():
             if os.path.isfile(path) and 'backup' in tags:
                 try:
@@ -156,7 +141,6 @@ class Updater:
                         ),
                         add_p=self.bot.time
                     )
-
         self.bot.send(
             self.l(
                 'checking_update',
@@ -231,7 +215,6 @@ class Updater:
                     raise RuntimeError(f"HTTP {res.status}: {path}")
                 await asyncio.sleep(retry_after)
                 continue
-
             if path.endswith('.json'):
                 latest = await res.json(content_type=None)
                 res.release()
@@ -258,7 +241,6 @@ class Updater:
                     if not is_image and sys.platform == 'win32':
                         latest = latest.replace('\r\n', '\n')
                 res.release()
-
                 if existing != latest:
                     if write:
                         self.bot.send(
@@ -285,51 +267,33 @@ class Updater:
             return False, latest
 
     def ensure_default_json(self, dev: Optional[bool] = False) -> None:
+        import urllib.error
+        import urllib.request
         branch = 'dev' if dev else 'main'
         base_url = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
-        for path in self.protected_json:
-            if os.path.isfile(path):
+        for filename in self.protected_json:
+            if os.path.isfile(filename):
                 continue
-
-            backup = path.removesuffix('.json') + '_old.json'
+            backup = filename.removesuffix('.json') + '_old.json'
             if os.path.isfile(backup):
-                with open(backup, 'r', encoding='utf-8-sig') as source:
-                    restored = json.load(source)
-                if not isinstance(restored, (dict, list)):
+                with open(backup, 'r', encoding='utf-8') as source:
+                    data = json.load(source)
+                if not isinstance(data, (dict, list)):
                     raise ValueError(f'Invalid JSON root: {backup}')
-                os.replace(backup, path)
+                with open(filename, 'x', encoding='utf-8') as target:
+                    json.dump(data, target, ensure_ascii=False, indent=4)
+                    target.write('\n')
                 continue
-
-            key = path.removesuffix('.json')
-            if self.bot.mode == 'repl' and self.bot.isfile(key):
-                restored = self.bot.load_json(key)
-                if not isinstance(restored, (dict, list)):
-                    raise ValueError(f'Invalid Replit DB JSON root: {key}')
-                self._write_initial_json(path, restored)
-                continue
-
             try:
-                with urllib.request.urlopen(base_url + path, timeout=20) as response:
-                    if response.status != 200:
-                        raise RuntimeError(f'HTTP {response.status}: {path}')
-                    downloaded = json.loads(response.read().decode('utf-8-sig'))
-            except (OSError, UnicodeError, ValueError, urllib.error.URLError) as exc:
-                raise RuntimeError(f'Failed to retrieve initial JSON: {path}') from exc
-            if not isinstance(downloaded, (dict, list)):
-                raise ValueError(f'Invalid downloaded JSON root: {path}')
-            self._write_initial_json(path, downloaded)
-
-    def _write_initial_json(self, path: str, data: Union[dict, list]) -> None:
-        temporary = f'{path}.tmp'
-        try:
-            with open(temporary, 'x', encoding='utf-8') as target:
-                json.dump(data, target, ensure_ascii=False, indent=4)
-            if os.path.isfile(path):
-                return
-            os.replace(temporary, path)
-        finally:
-            if os.path.isfile(temporary):
-                os.remove(temporary)
+                with urllib.request.urlopen(base_url + filename, timeout=10) as response:
+                    content = response.read().decode('utf-8')
+                data = json.loads(content)
+                if not isinstance(data, (dict, list)):
+                    raise ValueError(f'Invalid JSON root: {filename}')
+            except (OSError, UnicodeError, ValueError) as exc:
+                raise RuntimeError(f'Unable to retrieve missing {filename}: {exc}') from exc
+            with open(filename, 'x', encoding='utf-8') as target:
+                target.write(json.dumps(data, ensure_ascii=False, indent=4) + '\n')
 
     async def cleanup_protected_json(self) -> None:
         for path in self.protected_json:
@@ -337,46 +301,39 @@ class Updater:
             if os.path.isfile(path) or not os.path.isfile(backup):
                 continue
             try:
-                with open(backup, 'r', encoding='utf-8-sig') as source:
-                    content = json.load(source)
-                if not isinstance(content, (dict, list)):
+                async with aopen(backup, 'r', encoding='utf-8') as source:
+                    content = await source.read()
+                if not isinstance(json.loads(content), (dict, list)):
                     raise ValueError(f'Invalid JSON root: {backup}')
-                os.replace(backup, path)
+                async with aopen(path, 'x', encoding='utf-8') as target:
+                    await target.write(content)
             except (OSError, UnicodeError, ValueError) as exc:
-                print(f'Protected JSON restore failed for {path}: {exc}', file=sys.stderr)
+                print(f'Protected JSON recovery failed for {path}: {exc}', file=sys.stderr)
 
     async def check_updates(self, dev: Optional[bool] = False) -> bool:
         branch = 'dev' if dev else 'main'
         uri = f'https://raw.githubusercontent.com/sift732/Fortnite-Lobby-Bot-v3/{branch}/'
-
         await self.cleanup_protected_json()
-
         try:
             async with self.bot.http.session.get(f'{uri}version.json') as res:
                 if res.status != 200:
                     raise RuntimeError(f'HTTP {res.status}: version.json')
                 data = await res.json(content_type=None)
-
             remote_version = data['version']
             if not isinstance(remote_version, str):
                 raise ValueError('Invalid version')
             if version.parse(self.version) >= version.parse(remote_version):
                 return False
-
             self.bot.send(
                 self.l('new_version', remote_version),
                 add_p=self.bot.time
             )
-
             await self.update(uri)
             await self.write_version(remote_version)
             await self.cleanup_backups()
-
-
         except (OSError, asyncio.TimeoutError, ValueError, TypeError, KeyError, RuntimeError) as exc:
             print(f"Update failed: {exc}", file=sys.stderr)
             return False
-
         self.bot.send(
             self.l('update_finish', remote_version),
             add_p=[self.bot.time, lambda x: f'\n{x}']
@@ -387,7 +344,6 @@ class Updater:
         path = os.path.abspath(__file__)
         async with aopen(path, 'r', encoding='utf-8') as f:
             source = await f.read()
-
         pattern = r"(?m)^__version__\s*=\s*(['\"])[^'\"\r\n]*\1\s*$"
         updated, count = re.subn(
             pattern,
@@ -397,7 +353,6 @@ class Updater:
         )
         if count != 1:
             raise RuntimeError('Version declaration not found')
-
         temporary = f'{path}.tmp'
         try:
             async with aopen(temporary, 'w', encoding='utf-8') as f:
@@ -419,7 +374,6 @@ class Updater:
         self._update_backups.clear()
         self._failed_backups.clear()
         semaphore = asyncio.Semaphore(10)
-
         async def update_file(path: str) -> None:
             async with semaphore:
                 dirs = '/'.join(path.split('/')[:-1])
@@ -442,14 +396,11 @@ class Updater:
                             except Exception as restore_error:
                                 print(f'Restore failed for {path}: {restore_error}', file=sys.stderr)
                     raise
-
         paths = [path for path in self.updates if path != 'modules/auto_updater.py' and path not in self.protected_json]
-
         if self.bot.mode == 'pc':
             paths.extend(self.pc_updates)
         elif self.bot.mode == 'repl':
             paths.extend(self.repl_updates)
-
         results = await asyncio.gather(
             *(update_file(path) for path in paths),
             return_exceptions=True
