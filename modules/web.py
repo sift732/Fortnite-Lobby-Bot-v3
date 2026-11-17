@@ -73,15 +73,18 @@ class LoginManager:
 
     def login_user(self, request: Request, response: HTTPResponse) -> None:
         id_ = self.generate_id(request)
-        response.cookies[self.cookie_key] = id_
-        response.cookies[self.cookie_key]['httponly'] = True
-        response.cookies[self.cookie_key]['samesite'] = 'Lax'
+        response.add_cookie(
+            self.cookie_key,
+            id_,
+            httponly=True,
+            samesite='Lax'
+        )
         self.expires[id_] = datetime.datetime.utcnow() + self.expires_in
 
     def logout_user(self, request: Request, response: HTTPResponse) -> None:
         id_ = request.cookies.get(self.cookie_key)
         if id_ is not None:
-            del response.cookies[self.cookie_key]
+            response.delete_cookie(self.cookie_key)
             self.expires.pop(id_, None)
             
     def login_required(self, func: Callable) -> Callable:
