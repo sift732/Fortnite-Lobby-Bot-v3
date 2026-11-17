@@ -2538,7 +2538,7 @@ class Bot:
 
 
         version = sys.version_info
-        if (version.major != 3 or version.minor < 10) and self.mode != 'repl':
+        if (version.major, version.minor) < (3, 14) and self.mode != 'repl':
             self.send(
                 self.l(
                     'not_recommended_version',
