@@ -656,21 +656,8 @@ class Client(rebootpy.Client):
                     except AttributeError:
                         pass
 
-            
-            async def lookup_user(display_name):
-                try:
-                    return await self.http.account_graphql_get_by_display_name(display_name)
-                except rebootpy.HTTPException:
-                    user = await super(type(self), self).fetch_user_by_display_name(
-                        display_name,
-                        cache=False,
-                        raw=True
-                    )
-                    if user is None:
-                        return {'account': []}
-                    return {'account': [user]}
-
-            tasks.append(lookup_user(dn))
+            task = self.http.account_graphql_get_by_display_name(elem)
+            tasks.append(task)
 
         for elem in users:
             if self.is_display_name(elem):
@@ -817,7 +804,7 @@ class Client(rebootpy.Client):
         except rebootpy.FriendshipRequestAlreadySent as e:
             self.debug_print_exception(e)
             text = self.l(
-                'error_friendships_request_already_sent',
+                'error_friendship_request_already_sent',
                 self.name(user)
             )
             self.send(
@@ -940,7 +927,7 @@ class Client(rebootpy.Client):
         except rebootpy.FriendshipRequestAlreadySent as e:
             self.debug_print_exception(e)
             text = self.l(
-                'error_friendships_request_already_sent',
+                'error_friendship_request_already_sent',
                 self.name(request)
             )
             self.send(
@@ -1980,29 +1967,35 @@ class Client(rebootpy.Client):
                 return '{0.nickname}({0.display_name}) / {0.id}{1}'.format(user, append)
 
     def localized_cosmetic(self, item_id: str) -> Optional[dict]:
-        lang = self.config.get('lang', 'en')
+        lang = self.config.get('lang') or self.bot.config.get('lang') or 'en'
         item_dir = Path(getattr(self.bot, 'item_dir', 'item'))
-        data_path = item_dir / f'items_{lang}.json'
-        try:
-            with data_path.open('r', encoding='utf-8') as file:
-                data = json.load(file)
-            items = data.get('items', {})
-            if isinstance(items, dict):
+        result = {}
+        for language in dict.fromkeys(('en', lang)):
+            data_path = item_dir / f'items_{language}.json'
+            try:
+                with data_path.open('r', encoding='utf-8') as file:
+                    data = json.load(file)
+                items = data.get('items', {})
+                if not isinstance(items, dict):
+                    continue
                 cosmetic = items.get(item_id.casefold())
                 if cosmetic is None:
                     cosmetic = next((value for value in items.values()
                                      if isinstance(value, dict) and str(value.get('id', '')).casefold() == item_id.casefold()), None)
-                if isinstance(cosmetic, dict) and cosmetic.get('name'):
-                    return cosmetic
-        except (OSError, ValueError, TypeError):
-            pass
-        if lang == self.config.get('search_lang'):
-            for collection in (self.searcher.main_items, self.searcher.sub_items):
-                cosmetic = next((value for value in collection.values()
-                                 if isinstance(value, dict) and str(value.get('id', '')).casefold() == item_id.casefold()), None)
-                if cosmetic is not None:
-                    return cosmetic
-        return None
+                if not isinstance(cosmetic, dict):
+                    continue
+                if cosmetic.get('name'):
+                    result['name'] = cosmetic['name']
+                if cosmetic.get('id'):
+                    result['id'] = cosmetic['id']
+                if isinstance(cosmetic.get('type'), dict):
+                    result.setdefault('type', {}).update({
+                        key: value for key, value in cosmetic['type'].items()
+                        if value is not None
+                    })
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+        return result or None
 
     def name_cosmetic(self, item: dict) -> str:
         if self.config['loglevel'] == 'normal':
@@ -2373,7 +2366,7 @@ class Client(rebootpy.Client):
                             var
                         )
                         if self.party.get_member(member.id) is not None:
-                            await self.send_party_chat(text)
+                            await self.party.send(text)
                         else:
                             friend = self.get_friend(member.id)
                             if friend is not None:
@@ -2404,7 +2397,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 if self.party.get_member(member.id) is not None:
-                    await self.send_party_chat(text)
+                    await self.party.send(text)
                 else:
                     friend = self.get_friend(member.id)
                     if friend is not None:
@@ -2449,7 +2442,7 @@ class Client(rebootpy.Client):
                         var
                     )
                     if self.party.get_member(member.id) is not None:
-                        await self.send_party_chat(text)
+                        await self.party.send(text)
                     else:
                         friend = self.get_friend(member.id)
                         if friend is not None:
@@ -2524,7 +2517,7 @@ class Client(rebootpy.Client):
                         )
                         if (self.party.get_member(message.author.id) is not None
                                 and isinstance(message, rebootpy.PartyMessage)):
-                            await self.send_party_chat(text)
+                            await self.party.send(text)
                         else:
                             friend = self.get_friend(message.author.id)
                             if friend is not None:
@@ -3069,7 +3062,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 try:
-                    await self.send_party_chat(text)
+                    await self.party.send(text)
                 except Exception as e:
                     self.print_exception(e)
             friend = self.get_friend(member.id)
@@ -3091,7 +3084,7 @@ class Client(rebootpy.Client):
                     var
                 )
                 try:
-                    await self.send_party_chat(text)
+                    await self.party.send(text)
                     self.send(
                         self.l(
                             'random_message',
@@ -3692,11 +3685,6 @@ class Client(rebootpy.Client):
             await member.kick()
 
 
-    async def send_party_chat(self, content: str) -> None:
-        party = self.party
-        await party.send(content)
-        self.dispatch_event('party_message_send', party, content)
-
     async def event_party_message(self, message: rebootpy.PartyMessage) -> None:
         try:
             self.send(
@@ -3835,8 +3823,8 @@ class Client(rebootpy.Client):
                     break
             else:
                 execute = False
-        content = message.content[prefix_length:].strip()
-        args = content.split()
+        content = message.content[prefix_length:]
+        args = re.split(r'\s', content)
 
         select = self.select.get(message.author.id)
         if select is not None:

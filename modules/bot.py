@@ -1533,6 +1533,56 @@ class Bot:
             return None
         return match.group('id')
 
+    def get_localized_cosmetic(self, cosmetic: dict) -> dict:
+        cosmetic_id = cosmetic.get('id')
+        if not isinstance(cosmetic_id, str):
+            return cosmetic
+        name = None
+        display_value = None
+        for language in dict.fromkeys((self.config.get('lang') or 'en', 'en')):
+            path = f'{self.item_dir}/items_{language}'
+            if not self.isfile(path, force_file=True):
+                continue
+            try:
+                items = self.load_json(path, force_file=True).get('items', {})
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            match = next(
+                (value for key, value in items.items()
+                 if key.casefold() == cosmetic_id.casefold()),
+                None
+            )
+            if not isinstance(match, dict):
+                continue
+            if not name:
+                name = match.get('name')
+            if not display_value:
+                display_value = (match.get('type') or {}).get('displayValue')
+            if name and display_value:
+                break
+        result = {**cosmetic}
+        if name:
+            result['name'] = name
+        if display_value:
+            result['type'] = {
+                **cosmetic.get('type', {}),
+                'displayValue': display_value
+            }
+        return result
+
+    def resolve_config_cosmetic(self, text: str, backend_type: str) -> str:
+        if not text:
+            return text
+        cosmetic_id = self.get_config_item_id(text)
+        if cosmetic_id is None:
+            cosmetic_id = text
+        cosmetic = self.searcher.get_item(cosmetic_id)
+        if cosmetic is None:
+            cosmetic = self.sub_items.get(cosmetic_id)
+        if cosmetic is not None and cosmetic.get('type', {}).get('backendValue') == backend_type:
+            return cosmetic.get('path') or cosmetic['id']
+        return cosmetic_id if self.get_config_item_id(text) is not None else text
+
     def get_config_item_path(self, text: str) -> str:
         if text is None:
             return None
@@ -2133,6 +2183,14 @@ class Bot:
                     if not self.isfile(f'{self.item_dir}/items_{lang}', force_file=True):
                         sys.exit(1)
 
+        for lang in dict.fromkeys((self.config['lang'], 'en')):
+            path = f'{self.item_dir}/items_{lang}'
+            if not self.isfile(path, force_file=True):
+                try:
+                    await self.store_item_data(lang)
+                except Exception as exc:
+                    self.debug_print_exception(exc)
+
         for lang in dict.fromkeys((self.config['search_lang'], self.config['sub_search_lang'])):
             path = f'{self.item_dir}/new_items_{lang}'
             if self.isfile(path, force_file=True):
@@ -2702,16 +2760,25 @@ class Bot:
                     section = 0
                     if item == 'AthenaDance':
                         section = config['fortnite'][f'{conf}_section']
-                    coro = partial(
-                        MyClientPartyMember.change_asset,
-                        item,
-                        (self.get_config_item_path(config['fortnite'][conf])
-                         or config['fortnite'][conf]),
-                        variants=variants,
-                        section=section,
-                        keep=False
-                    )
-                    member_meta.append(coro)
+                    asset = config['fortnite'][conf]
+                    if not asset:
+                        continue
+                    asset = self.get_config_item_id(asset) or asset
+                    match = re.search(r"([^/\\.'\"]+)\.\1(?:['\"])?$", asset)
+                    if match is not None:
+                        asset = match.group(1)
+                    asset_functions = {
+                        'AthenaCharacter': MyClientPartyMember.set_outfit,
+                        'AthenaBackpack': MyClientPartyMember.set_backpack,
+                        'AthenaPickaxe': MyClientPartyMember.set_pickaxe,
+                        'AthenaDance': MyClientPartyMember.set_emote
+                    }
+                    options = {'asset': asset}
+                    if item == 'AthenaDance':
+                        options['section'] = section
+                    else:
+                        options['variants'] = variants
+                    member_meta.append(partial(asset_functions[item], **options))
 
                 auth = MyAdvancedAuth(
                     device_id=device_auth_details.get('device_id'),
