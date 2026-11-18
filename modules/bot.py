@@ -1967,41 +1967,28 @@ class Bot:
             compact=False
         )
 
-    async def get_new_item_data(self, lang: str) -> list:
-        if self.config['api'] == 'Fortnite-API':
-            return self.format_items((await self.http.get(
-                'https://fortnite-api.com/v2/cosmetics/br/new',
-                params={'language': lang}
-            ))['data']['items'], self.config['api'])
-        elif self.config['api'] == 'FortniteApi.io':
-            return self.format_items((await self.http.get(
-                'https://fortniteapi.io/v1/items/upcoming',
-                params={'lang': lang},
-                headers={'Authorization': self.config['api_key']}
-            ))['items'], self.config['api'])
-
     async def store_new_item_data(self, lang: str) -> None:
-        if self.isfile(f'{self.item_dir}/new_items_{lang}', force_file=True):
-            items = await self.aload_json(f'{self.item_dir}/new_items_{lang}', force_file=True)
-            items['items'] = CaseInsensitiveDict(items['items'])
-        else:
-            items = {'api': None, 'items': CaseInsensitiveDict()}
-        data = {i['id']: i for i in await self.get_new_item_data(lang)}
-        if self.config['api'] == 'FortniteApi.io':
-            for item in items['items'].values():
-                i = data.get(item['id'])
-                if i is None:
-                    continue
-                if item['variants'] is not None:
-                    data[item['id']]['variants'] = item['variants']
-        items['api'] = self.config['api']
-        self.save_json(
-            f'{self.item_dir}/new_items_{lang}',
-            {'api': self.config['api'], 'items': data},
-            force_file=True,
-            compact=False
-        )
-
+            if self.isfile(f'{self.item_dir}/new_items_{lang}', force_file=True):
+                items = await self.aload_json(f'{self.item_dir}/new_items_{lang}', force_file=True)
+                items['items'] = CaseInsensitiveDict(items['items'])
+            else:
+                items = {'api': None, 'items': CaseInsensitiveDict()}
+            data = {i['id']: i for i in items['items'].values()}
+            if self.config['api'] == 'FortniteApi.io':
+                for item in items['items'].values():
+                    i = data.get(item['id'])
+                    if i is None:
+                        continue
+                    if item['variants'] is not None:
+                        data[item['id']]['variants'] = item['variants']
+        
+            items['api'] = self.config['api']
+            self.save_json(
+                f'{self.item_dir}/new_items_{lang}',
+                {'api': self.config['api'], 'items': data},
+                force_file=True,
+                compact=False
+            )
 
     def format_playlist(self, data: dict, mode: str) -> dict:
         if mode == 'Fortnite-API':
