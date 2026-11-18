@@ -804,7 +804,7 @@ class Client(rebootpy.Client):
         except rebootpy.FriendshipRequestAlreadySent as e:
             self.debug_print_exception(e)
             text = self.l(
-                'error_friendship_request_already_sent',
+                'error_friendships_request_already_sent',
                 self.name(user)
             )
             self.send(
@@ -927,7 +927,7 @@ class Client(rebootpy.Client):
         except rebootpy.FriendshipRequestAlreadySent as e:
             self.debug_print_exception(e)
             text = self.l(
-                'error_friendship_request_already_sent',
+                'error_friendships_request_already_sent',
                 self.name(request)
             )
             self.send(
