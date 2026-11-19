@@ -392,6 +392,50 @@ async def discord_list_operation(func: Callable, attr: str, command: Command,
         await func(attr, message, user)
 
 
+def _get_cosmetic_styles(client: 'Client', asset: Optional[str]) -> List[dict]:
+    if not isinstance(asset, str) or not asset:
+        return []
+    if asset.startswith('<Item '):
+        matched = re.search(r"\bid=['\"]([^'\"]+)['\"]", asset)
+        if matched:
+            asset = matched.group(1)
+    elif '/' in asset or '.' in asset:
+        asset = asset.rsplit('/', 1)[-1].split('.', 1)[0].strip("'\"")
+    return client.searcher.get_style(asset)
+
+
+def _copy_style_variants(style: dict) -> List[dict]:
+    return [dict(variant) for variant in style.get('variants', []) if isinstance(variant, dict)]
+
+
+def _merge_cosmetic_variants(current: List[dict], additions: List[dict]) -> List[dict]:
+    variants = [dict(variant) for variant in (current or []) if isinstance(variant, dict)]
+    for variant in additions:
+        channel = str(variant.get('c', '')).casefold()
+        if channel:
+            variants = [v for v in variants if str(v.get('c', '')).casefold() != channel]
+        variants.append(dict(variant))
+    return variants
+
+
+def _parse_cosmetic_variants(args: List[str]) -> dict:
+    numeric_fields = {
+        'pattern', 'numeric', 'clothing_color', 'parts', 'progressive',
+        'particle', 'material', 'emissive'
+    }
+    string_fields = {'jersey_color', 'profile_banner'}
+    variants = {}
+    for field, value in zip(args[::2], args[1::2]):
+        key = re.sub(r'(?<!^)(?=[A-Z])', '_', field).lower().replace('-', '_')
+        if key in numeric_fields:
+            variants[key] = int(value)
+        elif key in string_fields:
+            variants[key] = value.upper() if key == 'jersey_color' else value
+        else:
+            raise KeyError(field)
+    return variants
+
+
 async def all_cosmetics(item: str, client: 'Client', message: MyMessage) -> None:
     attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
     if getattr(client, attr)(message.user_type):
@@ -4224,8 +4268,7 @@ class DefaultCommands:
 
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
-        styles = client.searcher.get_style(asset)
+        styles = _get_cosmetic_styles(client, asset)
 
         async def set_style(style):
             attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
@@ -4237,8 +4280,7 @@ class DefaultCommands:
             await client.party.me.change_asset(
                 item,
                 asset,
-                variants=style['variants'],
-                enlightenment=enlightenment,
+                variants=_copy_style_variants(style)
             )
 
         if len(styles) == 0:
@@ -4247,9 +4289,7 @@ class DefaultCommands:
             )
         else:
             client.select[message.author.id] = {
-                'exec': (
-                    'await set_style(style)'
-                ),
+                'exec': 'await set_style(style)',
                 'globals': {**globals(), **locals()},
                 'variables': [
                     {'style': style}
@@ -4281,9 +4321,7 @@ class DefaultCommands:
 
         item = client.bot.convert_to_backend_type(key)
         asset = client.party.me.asset(item)
-        variants = client.party.me.variants(item)
-        enlightenment = client.party.me.enlightenments
-        styles = client.searcher.get_style(asset)
+        styles = _get_cosmetic_styles(client, asset)
 
         async def add_style(style):
             attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
@@ -4292,11 +4330,14 @@ class DefaultCommands:
                     client.l('cosmetic_locked')
                 )
                 return
+            variants = _merge_cosmetic_variants(
+                client.party.me.variants(item),
+                _copy_style_variants(style)
+            )
             await client.party.me.change_asset(
                 item,
                 asset,
-                variants=variants + style['variants'],
-                enlightenment=enlightenment,
+                variants=variants
             )
 
         if len(styles) == 0:
@@ -4305,9 +4346,7 @@ class DefaultCommands:
             )
         else:
             client.select[message.author.id] = {
-                'exec': (
-                    'await add_style(style)'
-                ),
+                'exec': 'await add_style(style)',
                 'globals': {**globals(), **locals()},
                 'variables': [
                     {'style': style}
@@ -4325,12 +4364,7 @@ class DefaultCommands:
         usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}] [variant] [{client.l("number")}]'
     )
     async def set_variant(command: Command, client: 'Client', message: MyMessage) -> None:
-        if len(message.args) < 4:
-            await client.show_help(command, message)
-            return
-
-        if not any([message.args[1] in client.commands[key]
-                    for key in ['outfit', 'backpack', 'pickaxe']]):
+        if len(message.args) < 4 or (len(message.args) - 2) % 2 != 0:
             await client.show_help(command, message)
             return
 
@@ -4339,32 +4373,33 @@ class DefaultCommands:
                 key = k
                 break
         else:
+            await client.show_help(command, message)
             return
 
-        variant_dict = {}
-        for num, text in enumerate(message.args[2:]):
-            if num % 2 != 0:
-                continue
-            try:
-                variant_dict[text] = message.args[num + 3]
-            except IndexError:
-                break
         item = client.bot.convert_to_backend_type(key)
-        variants = client.party.me.create_variants(**variant_dict)
-        asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
-
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
             await message.reply(
                 client.l('cosmetic_locked')
             )
             return
+
+        try:
+            variant_dict = _parse_cosmetic_variants(message.args[2:])
+        except ValueError:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+        except KeyError:
+            await client.show_help(command, message)
+            return
+
+        variants = client.party.me.create_variant(**variant_dict)
         await client.party.me.change_asset(
             item,
-            asset,
+            client.party.me.asset(item),
             variants=variants,
-            enlightenment=enlightenment,
         )
 
     @command(
@@ -4372,12 +4407,7 @@ class DefaultCommands:
         usage='{name} [{client.l("cosmetic_types", **self.variables_without_self)}] [variant] [{client.l("number")}]'
     )
     async def add_variant(command: Command, client: 'Client', message: MyMessage) -> None:
-        if len(message.args) < 4:
-            await client.show_help(command, message)
-            return
-
-        if not any([message.args[1] in client.commands[key]
-                    for key in ['outfit', 'backpack', 'pickaxe']]):
+        if len(message.args) < 4 or (len(message.args) - 2) % 2 != 0:
             await client.show_help(command, message)
             return
 
@@ -4386,33 +4416,36 @@ class DefaultCommands:
                 key = k
                 break
         else:
+            await client.show_help(command, message)
             return
 
-        variant_dict = {}
-        for num, text in enumerate(message.args[2:]):
-            if num % 2 != 0:
-                continue
-            try:
-                variant_dict[text] = message.args[num + 3]
-            except IndexError:
-                break
         item = client.bot.convert_to_backend_type(key)
-        variants = client.party.me.variants(item)
-        variants += client.party.me.create_variants(**variant_dict)
-        asset = client.party.me.asset(item)
-        enlightenment = client.party.me.enlightenments
-
         attr = f'is_{client.bot.convert_backend_to_key(item)}_lock_for'
         if getattr(client, attr)(message.user_type):
             await message.reply(
                 client.l('cosmetic_locked')
             )
             return
+
+        try:
+            variant_dict = _parse_cosmetic_variants(message.args[2:])
+        except ValueError:
+            await message.reply(
+                client.l('please_enter_valid_number')
+            )
+            return
+        except KeyError:
+            await client.show_help(command, message)
+            return
+
+        variants = _merge_cosmetic_variants(
+            client.party.me.variants(item),
+            client.party.me.create_variant(**variant_dict)
+        )
         await client.party.me.change_asset(
             item,
-            asset,
+            client.party.me.asset(item),
             variants=variants,
-            enlightenment=enlightenment,
         )
 
     @command(
